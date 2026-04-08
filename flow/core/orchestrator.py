@@ -21,6 +21,17 @@ from flow.models.asr_base import ASRBackend
 from flow.models.cleanup import CleanupLLM
 from flow.models.parakeet import ParakeetASR
 from flow.models.qwen3_asr import Qwen3ASR
+from flow.models.whisper_mlx import WhisperASR
+
+
+def _make_asr(model_id: str) -> ASRBackend:
+    """Pick ASR backend based on model id substring."""
+    lower = model_id.lower()
+    if "whisper" in lower:
+        return WhisperASR(model_id)
+    if "qwen3-asr" in lower:
+        return Qwen3ASR(model_id)
+    return ParakeetASR(model_id)
 from flow.personalize.edit_watch import EditWatcher
 from flow.personalize.store import CorrectionStore
 from flow.ui import stream
@@ -50,8 +61,8 @@ class Orchestrator:
             auto_add=cfg.personalization.auto_add_to_dictionary,
         )
 
-        console.print("[dim]loading ASR models...[/]")
-        self.asr_speed: ASRBackend = ParakeetASR(cfg.asr.speed.model)
+        console.print(f"[dim]loading ASR ({cfg.asr.speed.model})...[/]")
+        self.asr_speed: ASRBackend = _make_asr(cfg.asr.speed.model)
         self.asr_accuracy: ASRBackend | None = None  # lazy
         console.print("[dim]loading cleanup LLM...[/]")
         self.cleanup = CleanupLLM(cfg.cleanup)
