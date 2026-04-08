@@ -3,7 +3,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "→ creating venv"
-python3 -m venv .venv
+PYBIN="${FLOW_PYTHON:-}"
+if [[ -z "$PYBIN" ]]; then
+  for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" >/dev/null 2>&1; then PYBIN="$candidate"; break; fi
+  done
+fi
+if [[ -z "$PYBIN" ]]; then
+  echo "need python >=3.11 — install via: brew install python@3.13" >&2
+  exit 1
+fi
+rm -rf .venv
+"$PYBIN" -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip

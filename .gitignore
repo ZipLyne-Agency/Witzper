@@ -8,6 +8,8 @@ build/
 dist/
 .swiftpm/
 *.xcodeproj/xcuserdata/
+swift-helper/.build/
+swift-helper/Package.resolved
 data/*.db
 data/*.sqlite
 data/corrections/
@@ -20,3 +22,4 @@ models_cache/
 .ruff_cache/
 .mypy_cache/
 node_modules/
+build/

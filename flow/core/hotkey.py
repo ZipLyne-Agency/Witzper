@@ -25,25 +25,37 @@ class HotkeyListener:
         self._task: asyncio.Task | None = None
 
     async def run(self) -> None:
-        if SOCKET_PATH.exists():
-            await self._run_swift_socket()
-        else:
-            await self._run_pynput_fallback()
+        # Keep reconnecting to the Swift helper socket if it drops.
+        # If the socket never appears, use the pynput fallback.
+        while True:
+            if SOCKET_PATH.exists():
+                try:
+                    await self._run_swift_socket()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[flow] hotkey socket error: {e} — reconnecting in 2s")
+                await asyncio.sleep(2)
+            else:
+                print(f"[flow] {SOCKET_PATH} not found — using pynput fallback")
+                await self._run_pynput_fallback()
+                return
 
     async def _run_swift_socket(self) -> None:
         """Consume newline-delimited JSON events from the Swift helper."""
         reader, _writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
+        print("[flow] connected to Swift helper socket")
         while True:
             line = await reader.readline()
             if not line:
-                break
+                print("[flow] socket EOF — will reconnect")
+                return
             try:
                 evt = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if evt.get("type") == "hotkey_down":
+            etype = evt.get("type")
+            if etype == "hotkey_down":
                 self.on_down()
-            elif evt.get("type") == "hotkey_up":
+            elif etype == "hotkey_up":
                 self.on_up()
 
     async def _run_pynput_fallback(self) -> None:

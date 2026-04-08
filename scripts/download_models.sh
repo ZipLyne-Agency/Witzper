@@ -13,26 +13,29 @@ set -euo pipefail
 # Optional (Command Mode, requires ≥128 GB unified memory):
 #   Qwen3-235B-A22B-Instruct-2507 4-bit          ~120 GB
 
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-  echo "installing huggingface_hub[cli]"
-  pip install "huggingface_hub[cli]"
+# Auto-activate venv if present
+if [[ -f "$(dirname "$0")/../.venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/../.venv/bin/activate"
 fi
+python -m pip install -q "huggingface_hub[cli]" 2>/dev/null || true
 
 echo "→ Parakeet TDT v3 (speed mode ASR)"
-huggingface-cli download mlx-community/parakeet-tdt-0.6b-v3
+hf download mlx-community/parakeet-tdt-0.6b-v3
 
 echo "→ Qwen3-30B-A3B-Instruct-2507 8-bit (cleanup LLM)"
-huggingface-cli download mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit
+hf download mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit
 
-echo "→ pyannote segmentation 3.1 (VAD)"
-huggingface-cli download pyannote/segmentation-3.1
+echo "→ pyannote segmentation 3.1 (VAD, optional — requires HF auth + license accept)"
+hf download pyannote/segmentation-3.1 2>/dev/null || \
+  echo "  skipped (not authenticated; Silero will be used instead)"
 
 echo "→ MiniLM-L6-v2 (few-shot embedder)"
-huggingface-cli download sentence-transformers/all-MiniLM-L6-v2
+hf download sentence-transformers/all-MiniLM-L6-v2
 
 if [[ "${FLOW_DOWNLOAD_COMMAND_MODEL:-0}" == "1" ]]; then
   echo "→ Qwen3-235B-A22B-Instruct-2507 4-bit (command mode, ~120 GB)"
-  huggingface-cli download mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit
+  hf download mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit
 fi
 
 echo

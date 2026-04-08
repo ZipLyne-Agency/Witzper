@@ -11,6 +11,8 @@ from flow.config import Config
 from flow.context.app_context import AppContextProvider
 from flow.context.dictionary import Dictionary
 from flow.context.few_shot import FewShotRetriever
+from flow.context.styles import StyleResolver
+from flow.personalize.snippets import SnippetStore
 from flow.core.audio import AudioCapture
 from flow.core.hotkey import HotkeyListener
 from flow.core.vad import make_vad
@@ -21,6 +23,7 @@ from flow.models.parakeet import ParakeetASR
 from flow.models.qwen3_asr import Qwen3ASR
 from flow.personalize.edit_watch import EditWatcher
 from flow.personalize.store import CorrectionStore
+from flow.ui import stream
 
 console = Console()
 
@@ -36,6 +39,8 @@ class Orchestrator:
         self.dictionary = Dictionary.open_default()
         self.app_context = AppContextProvider()
         self.few_shot = FewShotRetriever.open_default()
+        self.style_resolver = StyleResolver()
+        self.snippets = SnippetStore.open_default()
         self.inserter = Inserter(cfg.insertion)
         self.corrections = CorrectionStore.open_default()
         self.edit_watcher = EditWatcher(
@@ -50,6 +55,25 @@ class Orchestrator:
         self.asr_accuracy: ASRBackend | None = None  # lazy
         console.print("[dim]loading cleanup LLM...[/]")
         self.cleanup = CleanupLLM(cfg.cleanup)
+
+        # Start the dashboard event stream socket
+        stream.get_server()
+        self._emit_stats()
+        stream.emit({"type": "ready"})
+
+    def _emit_stats(self) -> None:
+        stream.emit({
+            "type": "stats",
+            "dict_size": len(self.dictionary.boost_terms()) + len(self.dictionary.replacements()),
+            "snippet_count": self.snippets.count(),
+            "correction_count": 0,
+            "styles": {
+                "personal_messages": self.cfg.styles.personal_messages,
+                "work_messages": self.cfg.styles.work_messages,
+                "email": self.cfg.styles.email,
+                "other": self.cfg.styles.other,
+            },
+        })
 
         self._busy = asyncio.Lock()
         self._utterance_task: asyncio.Task | None = None
@@ -109,19 +133,30 @@ class Orchestrator:
             if not raw.text.strip():
                 return
 
-            # 4. LLM cleanup with dynamic few-shots + focused-app tone priming
+            # 4. LLM cleanup with dynamic few-shots + per-app style instruction
             few_shots = self.few_shot.retrieve(raw.text, n=self.cfg.cleanup.few_shot_n)
+            style_instr = self.style_resolver.instruction_for(
+                self.cfg.styles,
+                app_ctx.app_name if app_ctx else None,
+                app_ctx.bundle_id if app_ctx else None,
+            )
             cleaned = self.cleanup.clean(
                 raw_transcript=raw.text,
                 alt_hypotheses=raw.alternatives,
                 app_context=app_ctx,
                 dictionary_boost=boost_terms,
                 few_shots=few_shots,
+                style_instruction=style_instr,
             )
             t_llm = time.perf_counter()
 
-            # 5. Deterministic dictionary replacement rules post-pass
+            # 5. Deterministic dictionary replacements
             final = self.dictionary.apply_replacements(cleaned)
+            # 6. Snippet expansion (post-cleanup, pre-insertion)
+            final = self.snippets.apply(
+                final,
+                strip_punct_on_solo=self.cfg.snippets.strip_trailing_punct_on_solo_trigger,
+            )
 
             # 6. Insert
             self.inserter.insert(final, app_ctx=app_ctx)
@@ -136,6 +171,18 @@ class Orchestrator:
                     f"total {(t_insert-t0)*1000:.0f}ms[/]"
                 )
                 console.print(f"[green]›[/] {final}")
+
+            # Emit to dashboard
+            stream.emit({
+                "type": "transcript",
+                "raw": raw.text,
+                "cleaned": final,
+                "app": (app_ctx.app_name if app_ctx else "") or "",
+                "vad_ms": (t_vad - t0) * 1000,
+                "asr_ms": (t_asr - t_vad) * 1000,
+                "llm_ms": (t_llm - t_asr) * 1000,
+                "total_ms": (t_insert - t0) * 1000,
+            })
 
             # 7. Arm the edit watcher so later edits become training signal
             self.edit_watcher.arm(

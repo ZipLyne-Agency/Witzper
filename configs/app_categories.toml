@@ -1,0 +1,70 @@
+# Maps app bundle IDs / names to a Flow Style category.
+# Each rule has: match (bundle id, app name, or "*"), category.
+
+[[rule]]
+match = "com.tinyspeck.slackmacgap"
+category = "work_messages"
+
+[[rule]]
+match = "com.microsoft.teams2"
+category = "work_messages"
+
+[[rule]]
+match = "com.microsoft.teams"
+category = "work_messages"
+
+[[rule]]
+match = "com.linear"
+category = "work_messages"
+
+[[rule]]
+match = "notion.id"
+category = "work_messages"
+
+[[rule]]
+match = "com.apple.mail"
+category = "email"
+
+[[rule]]
+match = "com.google.Chrome"
+category = "other"
+
+[[rule]]
+match = "company.thebrowser.Browser"  # Arc
+category = "other"
+
+[[rule]]
+match = "com.superhuman.electron"
+category = "email"
+
+[[rule]]
+match = "com.readdle.smartemail-Mac"  # Spark
+category = "email"
+
+[[rule]]
+match = "com.apple.MobileSMS"  # iMessage
+category = "personal_messages"
+
+[[rule]]
+match = "WhatsApp"
+category = "personal_messages"
+
+[[rule]]
+match = "org.telegram.desktop"
+category = "personal_messages"
+
+[[rule]]
+match = "ru.keepcoder.Telegram"
+category = "personal_messages"
+
+[[rule]]
+match = "com.facebook.archon"  # Messenger
+category = "personal_messages"
+
+[[rule]]
+match = "com.hnc.Discord"
+category = "personal_messages"
+
+[[rule]]
+match = "*"
+category = "other"

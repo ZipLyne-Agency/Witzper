@@ -15,8 +15,8 @@ device = "default"
 max_seconds = 120
 
 [vad]
-# "pyannote" (SOTA, heavier) or "silero" (lighter, faster)
-backend = "pyannote"
+# "silero" (default — ungated, fast) or "pyannote" (requires HF auth + license accept)
+backend = "silero"
 model = "pyannote/segmentation-3.1"
 # End-of-speech silence threshold in ms
 endpoint_silence_ms = 700
@@ -40,13 +40,13 @@ context_prompt_max_tokens = 1024
 [cleanup]
 # Hot-path LLM cleanup
 model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
-max_tokens = 256
-temperature = 0.2
+max_tokens = 96
+temperature = 0.0
 # Number of few-shot examples retrieved dynamically from correction store
 few_shot_n = 5
 # Hallucination guardrail: fall back to raw transcript if ratio exceeds this
-max_length_ratio = 3.0
-max_edit_distance_ratio = 0.7
+max_length_ratio = 1.8
+max_edit_distance_ratio = 0.5
 
 [command]
 # Heavy command-mode model. Only loads on demand via separate hotkey.
@@ -84,3 +84,21 @@ floating_pill = true
 [telemetry]
 # Everything stays local. No telemetry, ever.
 enabled = false
+
+[styles]
+# Per-category formatting style. Mirrors Wispr Flow's "Flow Styles".
+# Options: "formal" | "casual" | "very_casual" | "excited"
+# very_casual: no caps + less punctuation
+# casual:      caps + less punctuation       (recommended default)
+# excited:     caps + more exclamation points
+# formal:      caps + more periods
+personal_messages = "casual"
+work_messages = "casual"
+email = "formal"
+other = "casual"
+
+[snippets]
+# Match snippets case-insensitive whole-word against the cleaned transcript.
+# When a transcript IS just the trigger phrase, strip trailing punctuation first.
+case_insensitive = true
+strip_trailing_punct_on_solo_trigger = true

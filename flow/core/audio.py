@@ -21,6 +21,23 @@ class AudioCapture:
         self._stream: sd.InputStream | None = None
         self._recording = threading.Event()
         self._frames: list[np.ndarray] = []
+        # Open the input stream once now so macOS prompts for mic permission
+        # immediately on daemon startup rather than on first hotkey press.
+        self._warmup()
+
+    def _warmup(self) -> None:
+        try:
+            warmup = sd.InputStream(
+                samplerate=self.cfg.sample_rate,
+                channels=self.cfg.channels,
+                dtype="float32",
+                blocksize=int(self.cfg.sample_rate * 0.03),
+            )
+            warmup.start()
+            warmup.stop()
+            warmup.close()
+        except Exception as e:  # noqa: BLE001
+            print(f"[flow] mic warmup failed: {e}")
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ARG002
         if status:
@@ -28,6 +45,23 @@ class AudioCapture:
             pass
         if self._recording.is_set():
             self._q.put(indata.copy())
+
+    def _resolve_device(self):
+        """Map cfg.audio.device (string name or 'default') to a sounddevice index."""
+        name = (self.cfg.device or "default").strip()
+        if name == "default" or name == "":
+            return None
+        # Try exact match against available input devices
+        for i, dev in enumerate(sd.query_devices()):
+            if dev.get("max_input_channels", 0) > 0 and dev.get("name") == name:
+                return i
+        # Fallback: substring match
+        lname = name.lower()
+        for i, dev in enumerate(sd.query_devices()):
+            if dev.get("max_input_channels", 0) > 0 and lname in dev.get("name", "").lower():
+                return i
+        print(f"[flow] mic '{name}' not found — using system default")
+        return None
 
     def start(self) -> None:
         self._frames.clear()
@@ -41,6 +75,7 @@ class AudioCapture:
                 dtype="float32",
                 callback=self._callback,
                 blocksize=int(self.cfg.sample_rate * 0.03),  # 30 ms blocks
+                device=self._resolve_device(),
             )
             self._stream.start()
 

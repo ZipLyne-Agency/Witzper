@@ -1,14 +1,21 @@
-"""Text insertion — clipboard paste (default) or synthesized keystrokes."""
+"""Text insertion via the Swift helper (which holds Accessibility permission).
+
+The helper exposes an RPC at /tmp/flow-context.sock that accepts:
+    {"op":"insert","text":"..."}
+It uses CGEventPost (not osascript) so it works in any focused app.
+"""
 
 from __future__ import annotations
 
-import subprocess
-import threading
+import json
+import os
+import socket
 import time
-
-import pyperclip
+from pathlib import Path
 
 from flow.config import InsertionCfg
+
+CONTEXT_SOCKET = Path(os.environ.get("FLOW_CONTEXT_SOCKET", "/tmp/flow-context.sock"))
 
 
 class Inserter:
@@ -18,54 +25,27 @@ class Inserter:
     def insert(self, text: str, app_ctx=None) -> None:
         if not text:
             return
-        strategy = self.cfg.default_strategy
-        if app_ctx and app_ctx.rule:
-            strategy = app_ctx.rule.insertion
-        if strategy == "type":
-            self._type(text)
-        else:
-            self._paste(text)
-
-    # ------------------------------------------------------------------
-
-    def _paste(self, text: str) -> None:
-        old = ""
-        try:
-            old = pyperclip.paste()
-        except Exception:
-            pass
-        pyperclip.copy(text)
-        self._send_cmd_v()
-        if old:
-            threading.Timer(
-                self.cfg.restore_clipboard_after_ms / 1000.0,
-                lambda: self._safe_restore_clipboard(old),
-            ).start()
+        if not self._insert_via_helper(text):
+            print("[flow] WARNING: insert failed — helper unreachable")
 
     @staticmethod
-    def _safe_restore_clipboard(old: str) -> None:
+    def _insert_via_helper(text: str) -> bool:
+        if not CONTEXT_SOCKET.exists():
+            return False
         try:
-            pyperclip.copy(old)
-        except Exception:
-            pass
-
-    @staticmethod
-    def _send_cmd_v() -> None:
-        # Use osascript — the most reliable path that respects the active app
-        subprocess.run(
-            [
-                "osascript",
-                "-e",
-                'tell application "System Events" to keystroke "v" using command down',
-            ],
-            check=False,
-        )
-
-    def _type(self, text: str) -> None:
-        # Slow but works in terminals and password fields that block paste
-        from pynput.keyboard import Controller
-
-        kb = Controller()
-        for ch in text:
-            kb.type(ch)
-            time.sleep(0.002)
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            s.connect(str(CONTEXT_SOCKET))
+            payload = json.dumps({"op": "insert", "text": text}) + "\n"
+            s.sendall(payload.encode("utf-8"))
+            # Wait briefly for ack so the helper finishes paste before we move on
+            try:
+                _ = s.recv(4096)
+            except Exception:
+                pass
+            s.close()
+            time.sleep(0.05)
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"[flow] insert RPC failed: {e}")
+            return False

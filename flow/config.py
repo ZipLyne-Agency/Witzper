@@ -84,6 +84,18 @@ class TelemetryCfg(BaseModel):
     enabled: bool = False
 
 
+class StylesCfg(BaseModel):
+    personal_messages: str = "casual"
+    work_messages: str = "casual"
+    email: str = "formal"
+    other: str = "casual"
+
+
+class SnippetsCfg(BaseModel):
+    case_insensitive: bool = True
+    strip_trailing_punct_on_solo_trigger: bool = True
+
+
 class Config(BaseModel):
     hotkey: HotkeyCfg = Field(default_factory=HotkeyCfg)
     audio: AudioCfg = Field(default_factory=AudioCfg)
@@ -95,6 +107,8 @@ class Config(BaseModel):
     personalization: PersonalizationCfg = Field(default_factory=PersonalizationCfg)
     ui: UiCfg = Field(default_factory=UiCfg)
     telemetry: TelemetryCfg = Field(default_factory=TelemetryCfg)
+    styles: StylesCfg = Field(default_factory=StylesCfg)
+    snippets: SnippetsCfg = Field(default_factory=SnippetsCfg)
 
 
 def _merge(base: dict, override: dict) -> dict:

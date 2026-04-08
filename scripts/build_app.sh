@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Build flow-local.app bundle so macOS can grant it Accessibility permission
+# as a distinct app (not "Terminal" or the raw binary).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+APP_NAME="flow-local"
+APP_DIR="build/${APP_NAME}.app"
+CONTENTS="${APP_DIR}/Contents"
+MACOS="${CONTENTS}/MacOS"
+RES="${CONTENTS}/Resources"
+
+echo "→ building Swift helper (release)"
+(cd swift-helper && swift build -c release)
+
+echo "→ assembling ${APP_DIR}"
+rm -rf "${APP_DIR}"
+mkdir -p "${MACOS}" "${RES}"
+
+cp swift-helper/.build/release/flow-helper "${MACOS}/flow-local"
+chmod +x "${MACOS}/flow-local"
+
+cat > "${CONTENTS}/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>flow-local</string>
+    <key>CFBundleIdentifier</key><string>ai.flowlocal.helper</string>
+    <key>CFBundleName</key><string>flow-local</string>
+    <key>CFBundleDisplayName</key><string>flow-local</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Isaac Horowitz. MIT license.</string>
+    <key>NSMicrophoneUsageDescription</key><string>flow-local transcribes your voice entirely on this device.</string>
+    <key>NSAppleEventsUsageDescription</key><string>flow-local reads the focused app and inserts text.</string>
+</dict>
+</plist>
+PLIST
+
+# Ad-hoc sign so it runs without Gatekeeper friction
+codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+
+echo "✔ built ${APP_DIR}"
+echo "  install: cp -r ${APP_DIR} /Applications/"
+echo "  run:     open ${APP_DIR}"
