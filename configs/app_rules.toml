@@ -1,0 +1,58 @@
+# Per-app behavior rules. Matches on bundle ID (preferred) or app name.
+# Used to choose ASR mode, insertion strategy, and tone priming for cleanup.
+
+[[rule]]
+match = "com.tinyspeck.slackmacgap"
+name = "Slack"
+asr_mode = "speed"
+insertion = "paste"
+tone = "casual, lowercase-friendly, may include light emoji, short"
+
+[[rule]]
+match = "com.apple.mail"
+name = "Mail"
+asr_mode = "accuracy"
+insertion = "paste"
+tone = "formal email, complete sentences, properly punctuated"
+
+[[rule]]
+match = "com.microsoft.VSCode"
+name = "VS Code"
+asr_mode = "accuracy"
+insertion = "paste"
+tone = "technical; preserve code identifiers; prefer comments over prose"
+
+[[rule]]
+match = "com.apple.Terminal"
+name = "Terminal"
+asr_mode = "speed"
+insertion = "type"
+tone = "shell commands; no punctuation; no prose"
+
+[[rule]]
+match = "com.googlecode.iterm2"
+name = "iTerm"
+asr_mode = "speed"
+insertion = "type"
+tone = "shell commands; no punctuation; no prose"
+
+[[rule]]
+match = "com.apple.Notes"
+name = "Notes"
+asr_mode = "accuracy"
+insertion = "paste"
+tone = "natural prose"
+
+[[rule]]
+match = "notion.id"
+name = "Notion"
+asr_mode = "accuracy"
+insertion = "paste"
+tone = "document prose, markdown-aware"
+
+[[rule]]
+match = "*"
+name = "Default"
+asr_mode = "speed"
+insertion = "paste"
+tone = "natural prose, properly punctuated"

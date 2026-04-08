@@ -1,0 +1,86 @@
+# flow-local default configuration
+# Override by copying to ~/.config/flow-local/config.toml
+
+[hotkey]
+# Push-to-talk key. Options: "fn", "right_option", "right_cmd", "caps_lock"
+key = "fn"
+# If true, single-tap toggles instead of hold-to-talk
+toggle_mode = false
+
+[audio]
+sample_rate = 16000
+channels = 1
+device = "default"
+# Max utterance length in seconds (safety cap)
+max_seconds = 120
+
+[vad]
+# "pyannote" (SOTA, heavier) or "silero" (lighter, faster)
+backend = "pyannote"
+model = "pyannote/segmentation-3.1"
+# End-of-speech silence threshold in ms
+endpoint_silence_ms = 700
+
+[asr]
+# "accuracy" uses Qwen3-ASR with full context injection
+# "speed" uses Parakeet v3 with no context
+# "auto" picks per-app using rules in configs/app_rules.toml
+mode = "auto"
+
+[asr.speed]
+model = "mlx-community/parakeet-tdt-0.6b-v3"
+backend = "parakeet-mlx"
+
+[asr.accuracy]
+# Qwen3-ASR MLX port — set path after cloning locally
+model = "mlx-community/Qwen3-ASR"
+backend = "qwen3-asr-mlx"
+context_prompt_max_tokens = 1024
+
+[cleanup]
+# Hot-path LLM cleanup
+model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+max_tokens = 256
+temperature = 0.2
+# Number of few-shot examples retrieved dynamically from correction store
+few_shot_n = 5
+# Hallucination guardrail: fall back to raw transcript if ratio exceeds this
+max_length_ratio = 3.0
+max_edit_distance_ratio = 0.7
+
+[command]
+# Heavy command-mode model. Only loads on demand via separate hotkey.
+enabled = true
+model = "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
+max_tokens = 2048
+hotkey = "right_cmd+right_option"
+
+[insertion]
+# "paste" = clipboard + ⌘V (fast, works everywhere except password fields)
+# "type" = synthesize keystrokes (slow, works in terminals/password fields)
+default_strategy = "paste"
+restore_clipboard_after_ms = 200
+
+[personalization]
+# Auto-add corrected spellings to dictionary
+auto_add_to_dictionary = true
+# Edit-watch window after insertion
+edit_watch_window_seconds = 10
+# Nightly LoRA fine-tune of cleanup model
+cleanup_lora_enabled = true
+cleanup_lora_rank = 16
+cleanup_lora_schedule_cron = "0 3 * * *"
+# Biweekly LoRA fine-tune of ASR model on user audio+corrections
+asr_lora_enabled = true
+asr_lora_rank = 8
+asr_lora_schedule_cron = "0 4 */14 * *"
+# DSPy prompt optimization
+dspy_enabled = true
+
+[ui]
+menu_bar_icon = true
+floating_pill = true
+
+[telemetry]
+# Everything stays local. No telemetry, ever.
+enabled = false
