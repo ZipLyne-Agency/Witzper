@@ -143,6 +143,90 @@ final class UnixSocketServer {
     }
 }
 
+// MARK: - Stream listener (daemon → HUD)
+
+/// Connects to the Python daemon's /tmp/flow-stream.sock and forwards
+/// `partial` / `transcript` / `recording` events to the HUD so the user
+/// sees their words appear live while dictating (IDEAS #1).
+final class StreamListener {
+    private let path: String
+    private let queue = DispatchQueue(label: "flow.stream.listener")
+    private var stopped = false
+
+    init(path: String = "/tmp/flow-stream.sock") {
+        self.path = path
+    }
+
+    func start() {
+        queue.async { [weak self] in self?.runLoop() }
+    }
+
+    private func runLoop() {
+        while !stopped {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            if fd < 0 { sleep(1); continue }
+            var addr = sockaddr_un()
+            addr.sun_family = sa_family_t(AF_UNIX)
+            path.withCString { cstr in
+                withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+                    ptr.withMemoryRebound(to: CChar.self, capacity: 104) { dst in
+                        _ = strncpy(dst, cstr, 103)
+                    }
+                }
+            }
+            let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+            let ok = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, len)
+                }
+            }
+            if ok != 0 {
+                close(fd)
+                sleep(1)
+                continue
+            }
+            // Line-delimited JSON reader
+            var buffer = Data()
+            var chunk = [UInt8](repeating: 0, count: 4096)
+            while !stopped {
+                let n = chunk.withUnsafeMutableBufferPointer { recv(fd, $0.baseAddress, $0.count, 0) }
+                if n <= 0 { break }
+                buffer.append(chunk, count: n)
+                while let nl = buffer.firstIndex(of: 0x0A) {
+                    let line = buffer.subdata(in: 0..<nl)
+                    buffer.removeSubrange(0...nl)
+                    handleLine(line)
+                }
+            }
+            close(fd)
+            sleep(1) // reconnect
+        }
+    }
+
+    private func handleLine(_ data: Data) {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        switch type {
+        case "partial":
+            if let text = obj["text"] as? String {
+                HUD.shared.setPartial(text)
+            }
+        case "transcript":
+            if let text = obj["cleaned"] as? String {
+                HUD.shared.setPartial(text)
+            }
+            HUD.shared.setStatus("Inserted")
+        case "recording":
+            if let state = obj["state"] as? String, state == "start" {
+                HUD.shared.setStatus("Listening…")
+                HUD.shared.setPartial("")
+            }
+        default:
+            break
+        }
+    }
+}
+
 // MARK: - Hotkey tap
 
 final class HotkeyTap {
@@ -427,6 +511,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start servers
         let hotkeyServer = UnixSocketServer(path: "/tmp/Witzper.sock", queueLabel: "flow.hotkey")
         hotkeyServer.start()
+
+        // Listen to the daemon's event stream for live partial transcripts.
+        let listener = StreamListener()
+        listener.start()
+        self.retainedListener = listener
         let contextServer = UnixSocketServer(path: "/tmp/flow-context.sock", queueLabel: "flow.context")
         contextServer.start(requestHandler: { req in
             // Two ops: snapshot (default) and insert (paste text via clipboard + ⌘V).
@@ -480,6 +569,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     var retainedTap: HotkeyTap?
+    var retainedListener: StreamListener?
 
     func updateIcon(listening: Bool) {
         isListening = listening

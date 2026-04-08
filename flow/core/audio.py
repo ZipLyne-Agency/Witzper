@@ -79,18 +79,31 @@ class AudioCapture:
             )
             self._stream.start()
 
-    def stop(self) -> np.ndarray:
-        """Stop recording and return the captured mono waveform as float32 [-1, 1]."""
-        self._recording.clear()
-        # Drain queue
+    def _drain(self) -> None:
         while not self._q.empty():
-            self._frames.append(self._q.get_nowait())
+            try:
+                self._frames.append(self._q.get_nowait())
+            except queue.Empty:
+                break
+
+    def snapshot(self) -> np.ndarray:
+        """Return the audio captured so far without stopping the stream.
+
+        Used by the streaming/pre-flight ASR loop to run the ASR model
+        against the live buffer while the user is still holding the hotkey.
+        """
+        self._drain()
         if not self._frames:
             return np.zeros(0, dtype=np.float32)
         audio = np.concatenate(self._frames, axis=0)
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
         return audio.astype(np.float32)
+
+    def stop(self) -> np.ndarray:
+        """Stop recording and return the captured mono waveform as float32 [-1, 1]."""
+        self._recording.clear()
+        return self.snapshot()
 
     def close(self) -> None:
         if self._stream is not None:

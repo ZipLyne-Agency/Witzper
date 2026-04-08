@@ -40,6 +40,16 @@ class AsrCfg(BaseModel):
     mode: Literal["speed", "accuracy", "auto"] = "auto"
     speed: AsrModeCfg
     accuracy: AsrModeCfg
+    # Streaming partial transcripts + pre-flight ASR (IDEAS #1, #2).
+    # While the hotkey is held, we run the speed ASR on the growing audio
+    # buffer every `streaming_interval_ms`, emit `partial` events to the
+    # dashboard/HUD, and — on key release — reuse the last partial as the
+    # raw transcript if it covered ≥`streaming_reuse_ratio` of the final
+    # audio, skipping the serial final ASR pass.
+    streaming: bool = True
+    streaming_interval_ms: int = 350
+    streaming_min_audio_ms: int = 350
+    streaming_reuse_ratio: float = 0.95
 
 
 class CleanupCfg(BaseModel):
