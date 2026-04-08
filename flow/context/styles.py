@@ -21,9 +21,11 @@ STYLE_INSTRUCTIONS: dict[str, str] = {
         "Do not use exclamation points unless the speaker clearly intended one."
     ),
     "casual": (
-        "STYLE: CASUAL. Capitalize sentences and proper nouns. Use lighter punctuation: "
-        "drop the trailing period at the end of short messages, but keep question marks "
-        "and necessary commas. No exclamation points unless the speaker emphasized."
+        "STYLE: CASUAL. Capitalize the first word of each sentence and proper nouns. "
+        "Keep punctuation light: question marks where needed, commas only when truly "
+        "necessary, and DROP the trailing period at the end of the message. "
+        "Example input: 'hey are you free for lunch tomorrow lets do twelve if that works for you' "
+        "Example output: 'Hey are you free for lunch tomorrow? Let's do 12 if that works for you'"
     ),
     "very_casual": (
         "STYLE: VERY CASUAL. Use ALL LOWERCASE — even at the start of sentences and for "

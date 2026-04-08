@@ -11,7 +11,7 @@ from rich.console import Console
 from flow.config import load_config
 from flow.core.orchestrator import Orchestrator
 
-app = typer.Typer(add_completion=False, no_args_is_help=True, help="flow-local — local dictation")
+app = typer.Typer(add_completion=False, no_args_is_help=True, help="Witzper — local dictation")
 console = Console()
 
 
@@ -24,14 +24,14 @@ def run(
     import os
     import signal as _sig
 
-    pid_path = Path("/tmp/flow-local.pid")
+    pid_path = Path("/tmp/Witzper.pid")
     if pid_path.exists():
         try:
             old_pid = int(pid_path.read_text().strip())
             try:
                 os.kill(old_pid, 0)  # check alive
                 console.print(
-                    f"[red]flow-local daemon already running (pid {old_pid})[/] — "
+                    f"[red]Witzper daemon already running (pid {old_pid})[/] — "
                     f"kill it first: kill {old_pid}"
                 )
                 raise typer.Exit(1)
@@ -49,7 +49,7 @@ def run(
     _sig.signal(_sig.SIGINT, _cleanup)
 
     cfg = load_config(config)
-    console.print(f"[bold cyan]flow-local[/] starting ({cfg.asr.mode} mode)")
+    console.print(f"[bold cyan]Witzper[/] starting ({cfg.asr.mode} mode)")
     orch = Orchestrator(cfg, verbose=verbose)
     try:
         asyncio.run(orch.run_forever())
@@ -153,7 +153,7 @@ def style(
             existing = tomli.load(f)
     existing.setdefault("styles", {})[category] = name
 
-    lines = ["# flow-local user config", ""]
+    lines = ["# Witzper user config", ""]
     for section, kv in existing.items():
         lines.append(f"[{section}]")
         for k, v in kv.items():

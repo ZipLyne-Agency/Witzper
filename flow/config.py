@@ -9,7 +9,7 @@ import tomli
 from pydantic import BaseModel, Field
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "default.toml"
-USER_CONFIG_PATH = Path.home() / ".config" / "flow-local" / "config.toml"
+USER_CONFIG_PATH = Path.home() / ".config" / "Witzper" / "config.toml"
 
 
 class HotkeyCfg(BaseModel):
@@ -87,7 +87,7 @@ class TelemetryCfg(BaseModel):
 class StylesCfg(BaseModel):
     personal_messages: str = "casual"
     work_messages: str = "casual"
-    email: str = "formal"
+    email: str = "casual"
     other: str = "casual"
 
 

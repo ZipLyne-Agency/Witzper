@@ -1,4 +1,4 @@
-// Bloomberg-terminal-style dashboard window for flow-local.
+// Bloomberg-terminal-style dashboard window for Witzper.
 // Black background, monospace amber/green/cyan, live feed of transcriptions
 // streamed from the Python daemon over a Unix socket.
 
@@ -176,8 +176,16 @@ extension Font {
 
 // MARK: - Dashboard SwiftUI view
 
+enum DashboardTab: String, CaseIterable {
+    case liveFeed = "LIVE FEED"
+    case snippets = "SNIPPETS"
+    case dictionary = "DICTIONARY"
+    case settings = "SETTINGS"
+}
+
 struct DashboardView: View {
     @ObservedObject var state = DashboardState.shared
+    @State private var selectedTab: DashboardTab = .liveFeed
 
     var body: some View {
         ZStack {
@@ -185,15 +193,9 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 headerBar
                 Divider().background(Color.bbBorder)
-                HStack(alignment: .top, spacing: 0) {
-                    leftPanel
-                        .frame(width: 280)
-                    Divider().background(Color.bbBorder)
-                    centerPanel
-                    Divider().background(Color.bbBorder)
-                    rightPanel
-                        .frame(width: 260)
-                }
+                tabBar
+                Divider().background(Color.bbBorder)
+                tabContent
                 Divider().background(Color.bbBorder)
                 statusBar
             }
@@ -201,11 +203,61 @@ struct DashboardView: View {
         .frame(minWidth: 1100, minHeight: 700)
     }
 
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .liveFeed:
+            HStack(alignment: .top, spacing: 0) {
+                leftPanel
+                    .frame(width: 280)
+                Divider().background(Color.bbBorder)
+                centerPanel
+                Divider().background(Color.bbBorder)
+                rightPanel
+                    .frame(width: 260)
+            }
+        case .snippets:
+            SnippetsView()
+        case .dictionary:
+            DictionaryView()
+        case .settings:
+            SettingsView()
+        }
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(DashboardTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .background(Color(white: 0.04))
+    }
+
+    private func tabButton(_ tab: DashboardTab) -> some View {
+        let active = (tab == selectedTab)
+        return Button(action: { selectedTab = tab }) {
+            VStack(spacing: 4) {
+                Text(tab.rawValue)
+                    .font(.bbHeader)
+                    .foregroundColor(active ? .bbAmber : .bbDim)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                Rectangle()
+                    .fill(active ? Color.bbAmber : Color.clear)
+                    .frame(height: 2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: header
 
     private var headerBar: some View {
         HStack(spacing: 16) {
-            Text("FLOW//LOCAL")
+            Text("WITZPER")
                 .font(.system(size: 16, weight: .black, design: .monospaced))
                 .foregroundColor(.bbAmber)
             Text("v0.1.0")
@@ -360,7 +412,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 shortcutRow("HOLD", "dictate")
                 shortcutRow("⌘T", "test sound + HUD")
-                shortcutRow("⌘Q", "quit flow-local")
+                shortcutRow("⌘Q", "quit Witzper")
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
@@ -380,7 +432,7 @@ struct DashboardView: View {
             Text(state.status == "READY" ? "DAEMON CONNECTED" : "DAEMON DISCONNECTED")
                 .font(.bbSmall).foregroundColor(.bbDim)
             Spacer()
-            Text("FLOW//LOCAL — fully on-device dictation")
+            Text("WITZPER — fully on-device dictation")
                 .font(.bbSmall).foregroundColor(.bbDim)
         }
         .padding(.horizontal, 14)
@@ -528,7 +580,7 @@ final class DashboardWindowController: NSWindowController {
         )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "flow-local"
+        window.title = "Witzper"
         window.isReleasedWhenClosed = false
         window.contentViewController = hosting
         window.center()

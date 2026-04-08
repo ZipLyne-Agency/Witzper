@@ -5,7 +5,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ Swift helper (menu-bar, Accessibility perms)                 │
-│   CGEventTap → hotkey_down / hotkey_up  → /tmp/flow-local.sock│
+│   CGEventTap → hotkey_down / hotkey_up  → /tmp/Witzper.sock│
 │   AXUIElement → {app, window, surrounding, selected}          │
 │                                          → /tmp/flow-context.sock│
 └───────────────┬──────────────────────────┬───────────────────┘
@@ -105,4 +105,4 @@
 
 ## What goes over the network
 
-Nothing. All inference is local MLX, all storage is local SQLite + local audio files under `~/.local/share/flow-local/`. The Swift helper's sockets are Unix domain sockets mode 0600. No telemetry, no cloud models, no account required.
+Nothing. All inference is local MLX, all storage is local SQLite + local audio files under `~/.local/share/Witzper/`. The Swift helper's sockets are Unix domain sockets mode 0600. No telemetry, no cloud models, no account required.

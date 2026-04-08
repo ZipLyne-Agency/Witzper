@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-DEFAULT_ROOT = Path.home() / ".local" / "share" / "flow-local"
+DEFAULT_ROOT = Path.home() / ".local" / "share" / "Witzper"
 DEFAULT_DB = DEFAULT_ROOT / "corrections.db"
 AUDIO_DIR = DEFAULT_ROOT / "audio_cache"
 

@@ -7,7 +7,7 @@
 //   flow-helper --hotkey caps_lock
 //   flow-helper --hotkey fn
 //
-// Emits line-delimited JSON to /tmp/flow-local.sock:
+// Emits line-delimited JSON to /tmp/Witzper.sock:
 //   {"type":"hotkey_down"}
 //   {"type":"hotkey_up"}
 //
@@ -305,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateIcon(listening: false)
 
         let menu = NSMenu()
-        let statusMenuItem = NSMenuItem(title: "flow-local", action: nil, keyEquivalent: "")
+        let statusMenuItem = NSMenuItem(title: "Witzper", action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
@@ -415,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(
-            title: "Quit flow-local",
+            title: "Quit Witzper",
             action: #selector(quitApp),
             keyEquivalent: "q"
         )
@@ -425,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
 
         // Start servers
-        let hotkeyServer = UnixSocketServer(path: "/tmp/flow-local.sock", queueLabel: "flow.hotkey")
+        let hotkeyServer = UnixSocketServer(path: "/tmp/Witzper.sock", queueLabel: "flow.hotkey")
         hotkeyServer.start()
         let contextServer = UnixSocketServer(path: "/tmp/flow-context.sock", queueLabel: "flow.context")
         contextServer.start(requestHandler: { req in
@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         if !trusted {
             FileHandle.standardError.write(
-                "flow-local: Accessibility not granted. Click the menu bar icon → Open Accessibility Settings.\n".data(using: .utf8)!
+                "Witzper: Accessibility not granted. Click the menu bar icon → Open Accessibility Settings.\n".data(using: .utf8)!
             )
             updateIconNotTrusted()
         }
@@ -484,8 +484,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func updateIcon(listening: Bool) {
         isListening = listening
         if let button = statusItem.button {
-            button.title = listening ? "🔴 flow" : "⚪ flow"
-            button.toolTip = listening ? "Listening…" : "flow-local ready"
+            button.title = listening ? "🔴 Witzper" : "⚪ Witzper"
+            button.toolTip = listening ? "Listening…" : "Witzper ready"
         }
         if listening {
             HUD.shared.show()
@@ -496,8 +496,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func updateIconNotTrusted() {
         if let button = statusItem.button {
-            button.title = "⚠ flow"
-            button.toolTip = "flow-local: grant Accessibility permission"
+            button.title = "⚠ Witzper"
+            button.toolTip = "Witzper: grant Accessibility permission"
         }
     }
 
@@ -506,16 +506,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let hk = Hotkey(rawValue: raw) else { return }
         let alert = NSAlert()
         alert.messageText = "Change hotkey to \(hk.label)?"
-        alert.informativeText = "flow-local will quit. Relaunch it from your Applications folder or Terminal."
+        alert.informativeText = "Witzper will quit. Relaunch it from your Applications folder or Terminal."
         alert.addButton(withTitle: "Change & Quit")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             // Write to user config
             let home = FileManager.default.homeDirectoryForCurrentUser
-            let cfgDir = home.appendingPathComponent(".config/flow-local")
+            let cfgDir = home.appendingPathComponent(".config/Witzper")
             try? FileManager.default.createDirectory(at: cfgDir, withIntermediateDirectories: true)
             let cfgPath = cfgDir.appendingPathComponent("config.toml")
-            let content = "# flow-local user config\n[hotkey]\nkey = \"\(hk.rawValue)\"\ntoggle_mode = false\n"
+            let content = "# Witzper user config\n[hotkey]\nkey = \"\(hk.rawValue)\"\ntoggle_mode = false\n"
             try? content.write(to: cfgPath, atomically: true, encoding: .utf8)
             NSApp.terminate(nil)
         }
@@ -523,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func readCurrentMic() -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/flow-local/config.toml")
+            .appendingPathComponent(".config/Witzper/config.toml")
         guard let txt = try? String(contentsOf: path, encoding: .utf8) else { return "default" }
         // crude parse: look for device = "..."
         for line in txt.components(separatedBy: "\n") {
@@ -557,7 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func writeUserConfig(_ mutator: (inout [String: Any]) -> Void) {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".config/flow-local")
+        let dir = home.appendingPathComponent(".config/Witzper")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("config.toml")
         // Read existing
@@ -585,7 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (k, v) in sections { dict[k] = v }
         mutator(&dict)
 
-        var lines: [String] = ["# flow-local user config", ""]
+        var lines: [String] = ["# Witzper user config", ""]
         for (section, kv) in dict {
             guard let kvDict = kv as? [String: Any] else { continue }
             lines.append("[\(section)]")
@@ -643,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showDiagnostics() {
         let trusted = AXIsProcessTrustedWithOptions(nil)
         let alert = NSAlert()
-        alert.messageText = "flow-local diagnostics"
+        alert.messageText = "Witzper diagnostics"
         let mic: String
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: mic = "✅ granted"
@@ -656,10 +656,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Accessibility (hotkey + AX context): \(trusted ? "✅ granted" : "❌ NOT GRANTED")
             Microphone: \(mic)
             Hotkey: \(hotkey.label)
-            Sockets: /tmp/flow-local.sock, /tmp/flow-context.sock
+            Sockets: /tmp/Witzper.sock, /tmp/flow-context.sock
 
             If Accessibility is not granted, the hotkey will silently do nothing.
-            Use the menu to open settings and toggle flow-local on, then quit and relaunch this app.
+            Use the menu to open settings and toggle Witzper on, then quit and relaunch this app.
             """
         alert.addButton(withTitle: "Request Microphone Now")
         alert.addButton(withTitle: "OK")
@@ -685,13 +685,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Accessibility permission required"
         alert.informativeText = """
-            flow-local needs Accessibility + Input Monitoring permission to capture your hotkey globally \
+            Witzper needs Accessibility + Input Monitoring permission to capture your hotkey globally \
             and read the focused text field for context.
 
             1. Click "Open Settings" below
-            2. Add flow-local (or drag it from Applications)
+            2. Add Witzper (or drag it from Applications)
             3. Enable the toggle
-            4. Quit and relaunch flow-local
+            4. Quit and relaunch Witzper
             """
         alert.addButton(withTitle: "Open Settings")
         alert.addButton(withTitle: "Later")

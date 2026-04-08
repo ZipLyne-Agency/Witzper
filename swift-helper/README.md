@@ -1,7 +1,7 @@
 # flow-helper (Swift)
 
 macOS menu-bar helper providing:
-- Global hotkey via `CGEventTap` → `/tmp/flow-local.sock`
+- Global hotkey via `CGEventTap` → `/tmp/Witzper.sock`
 - Focused-element AX snapshot server → `/tmp/flow-context.sock`
 
 ## Build

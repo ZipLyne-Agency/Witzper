@@ -1,5 +1,5 @@
-# flow-local default configuration
-# Override by copying to ~/.config/flow-local/config.toml
+# Witzper default configuration
+# Override by copying to ~/.config/Witzper/config.toml
 
 [hotkey]
 # Push-to-talk key. Options: "fn", "right_option", "right_cmd", "caps_lock"
@@ -86,15 +86,12 @@ floating_pill = true
 enabled = false
 
 [styles]
-# Per-category formatting style. Mirrors Wispr Flow's "Flow Styles".
-# Options: "formal" | "casual" | "very_casual" | "excited"
-# very_casual: no caps + less punctuation
-# casual:      caps + less punctuation       (recommended default)
-# excited:     caps + more exclamation points
-# formal:      caps + more periods
+# Single global style for all apps. Default: casual (caps + less punctuation).
+# Other options remain available for power users via 'flow style <category> <name>'
+# but the recommended setup is to leave everything on casual.
 personal_messages = "casual"
 work_messages = "casual"
-email = "formal"
+email = "casual"
 other = "casual"
 
 [snippets]

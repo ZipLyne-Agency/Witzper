@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-SOCKET_PATH = Path(os.environ.get("FLOW_SOCKET", "/tmp/flow-local.sock"))
+SOCKET_PATH = Path(os.environ.get("FLOW_SOCKET", "/tmp/Witzper.sock"))
 
 
 class HotkeyListener:

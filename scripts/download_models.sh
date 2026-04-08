@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Prefetch the model weights used by flow-local. These go into the HF hub cache
+# Prefetch the model weights used by Witzper. These go into the HF hub cache
 # (~/.cache/huggingface/hub) so MLX can load them without a network trip.
 #
 # Default set ~= 40 GB:
@@ -47,6 +47,6 @@ echo "    git clone https://github.com/<community>/qwen3-asr-mlx"
 echo "    pip install -e ./qwen3-asr-mlx"
 echo
 echo "  Then set asr.mode = 'accuracy' or 'auto' in your config."
-echo "  Until then, flow-local will run with Parakeet only (speed mode)."
+echo "  Until then, Witzper will run with Parakeet only (speed mode)."
 echo
 echo "✔ downloads complete"

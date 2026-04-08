@@ -57,7 +57,7 @@ def write_user_config(hotkey: str) -> Path:
     existing.setdefault("hotkey", {})["key"] = hotkey
     existing["hotkey"]["toggle_mode"] = False
 
-    lines = ["# flow-local user config (overrides configs/default.toml)", ""]
+    lines = ["# Witzper user config (overrides configs/default.toml)", ""]
     for section, kv in existing.items():
         lines.append(f"[{section}]")
         for k, v in kv.items():
@@ -73,7 +73,7 @@ def write_user_config(hotkey: str) -> Path:
 
 
 def run_wizard() -> None:
-    console.print("[bold cyan]flow-local setup[/]\n")
+    console.print("[bold cyan]Witzper setup[/]\n")
 
     current = None
     if USER_CONFIG_PATH.exists():

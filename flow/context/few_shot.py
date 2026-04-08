@@ -14,7 +14,7 @@ import numpy as np
 
 from flow.models.cleanup import FewShotExample
 
-DEFAULT_DB = Path.home() / ".local" / "share" / "flow-local" / "few_shot.db"
+DEFAULT_DB = Path.home() / ".local" / "share" / "Witzper" / "few_shot.db"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 

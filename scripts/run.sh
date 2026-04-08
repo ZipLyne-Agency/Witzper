@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 source .venv/bin/activate
 
 # First-run: if no user config exists, run the hotkey picker.
-USER_CFG="$HOME/.config/flow-local/config.toml"
+USER_CFG="$HOME/.config/Witzper/config.toml"
 if [[ ! -f "$USER_CFG" ]]; then
   echo "→ first run — let's pick your hotkey"
   python -m flow setup
@@ -15,7 +15,7 @@ fi
 # Read hotkey from user config (fall back to right_option)
 HOTKEY=$(python -c "
 import tomli, os
-p=os.path.expanduser('~/.config/flow-local/config.toml')
+p=os.path.expanduser('~/.config/Witzper/config.toml')
 try:
     with open(p,'rb') as f: print(tomli.load(f).get('hotkey',{}).get('key','right_option'))
 except Exception:

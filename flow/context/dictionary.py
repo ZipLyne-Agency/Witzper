@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_DB = Path.home() / ".local" / "share" / "flow-local" / "dictionary.db"
+DEFAULT_DB = Path.home() / ".local" / "share" / "Witzper" / "dictionary.db"
 
 
 @dataclass

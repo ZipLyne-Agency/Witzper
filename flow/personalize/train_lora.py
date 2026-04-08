@@ -19,7 +19,7 @@ from flow.personalize.store import CorrectionStore
 
 console = Console()
 
-LORA_ROOT = Path.home() / ".local" / "share" / "flow-local" / "lora"
+LORA_ROOT = Path.home() / ".local" / "share" / "Witzper" / "lora"
 
 
 def train_cleanup() -> None:
