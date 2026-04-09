@@ -313,7 +313,7 @@ struct SettingsView: View {
         // and is deliberately not matched.
         let script = """
         cd \(home)/Witzper && source .venv/bin/activate && \
-        pkill -9 -f 'flow run' ; pkill -9 -f '\(home)/Witzper/Witzper' ; sleep 1 ; \
+        pkill -9 -f '(python.*-m flow run|/bin/flow run)' ; pkill -9 -f '\(home)/Witzper/Witzper' ; sleep 1 ; \
         rm -f /tmp/Witzper.pid ; \
         if [[ -x ./Witzper ]]; then \
           PATH=/opt/homebrew/bin:$PATH nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \

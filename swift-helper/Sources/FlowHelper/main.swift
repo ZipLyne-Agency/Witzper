@@ -989,19 +989,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// launch so opening Witzper.app from /Applications is a one-click start
     /// — previously the user had to manually run ``python -m flow run``.
     func ensureDaemonRunning() {
+        // Detect an already-running daemon via a narrow regex. The old
+        // pattern "flow run" was a substring match that false-positived
+        // on any cmdline containing "workflow run" — notably `gh run view
+        // ... release.yml` during development. That made the helper skip
+        // the spawn and silently leave the user without a daemon.
+        // New pattern only matches the actual daemon invocations.
         let check = Process()
         check.launchPath = "/usr/bin/pgrep"
-        check.arguments = ["-f", "flow run"]
+        check.arguments = ["-f", "(python.*-m flow run|/bin/flow run)"]
         let pipe = Pipe()
         check.standardOutput = pipe
         check.standardError = Pipe()
-        do { try check.run() } catch { return }
+        do {
+            try check.run()
+        } catch {
+            // Fail open: if pgrep itself can't launch, try to spawn anyway.
+            spawnPythonDaemon()
+            return
+        }
         check.waitUntilExit()
         let data = pipe.fileHandleForReading.availableData
         let output = String(data: data, encoding: .utf8) ?? ""
         if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             FileHandle.standardError.write(
-                "Witzper: python daemon already running — skip spawn\n".data(using: .utf8)!
+                "Witzper: python daemon already running (pid \(output.trimmingCharacters(in: .whitespacesAndNewlines))) — skip spawn\n".data(using: .utf8)!
             )
             return
         }
@@ -1082,7 +1094,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // excluded by using the absolute repo path — pkill -f won't match
         // it.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        for pattern in ["flow run", "\(home)/Witzper/Witzper"] {
+        // Narrow patterns to avoid matching anything with "workflow run" in
+        // its cmdline (gh CLI, GitHub Actions shells, etc.) — see
+        // ensureDaemonRunning() for the long-form explanation.
+        for pattern in [
+            "(python.*-m flow run|/bin/flow run)",
+            "\(home)/Witzper/Witzper",
+        ] {
             let k = Process()
             k.launchPath = "/usr/bin/pkill"
             k.arguments = ["-9", "-f", pattern]
