@@ -58,9 +58,10 @@ max_length_ratio = 1.8
 max_edit_distance_ratio = 0.5
 
 [command]
-# Heavy command-mode model. Only loads on demand via separate hotkey.
+# Command-mode model. Only loads on demand via separate hotkey.
+# Defaults to reusing the cleanup model so there's zero extra RAM cost.
 enabled = true
-model = "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
+model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
 max_tokens = 2048
 hotkey = "right_cmd+right_option"
 

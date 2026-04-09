@@ -140,21 +140,12 @@ enum ModelCatalog {
         ),
         ModelOption(
             id: "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit",
-            label: "Qwen3 30B-A3B (shared)",
+            label: "Qwen3 30B-A3B (shared — default)",
             role: .command,
             approxRamGB: 32.0,
             approxLatencyMs: 800,
             qualityStars: 5,
-            blurb: "Reuse the cleanup model. Zero extra RAM if it's already loaded."
-        ),
-        ModelOption(
-            id: "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit",
-            label: "Qwen3 235B-A22B (default heavy)",
-            role: .command,
-            approxRamGB: 100.0,
-            approxLatencyMs: 3000,
-            qualityStars: 5,
-            blurb: "Witzper's no-compromise option. Needs 128 GB RAM. Claude/GPT-class output."
+            blurb: "Reuses the cleanup model. Zero extra RAM if it's already loaded."
         ),
     ]
 }

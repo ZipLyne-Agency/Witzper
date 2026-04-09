@@ -76,7 +76,7 @@
       └───────────────────────────────────────┘
 ```
 
-## Latency budget (target, M5 Max 128 GB)
+## Latency budget (target, M-series Max 64 GB)
 
 | Stage                    | Target      |
 |--------------------------|-------------|
@@ -91,8 +91,7 @@
 
 - **Parakeet TDT 0.6B v3** — fastest high-accuracy ASR on Apple Silicon. 10× Whisper Large v3 speed, lower WER, multilingual (25 langs). Ideal for speed mode.
 - **Qwen3-ASR** — audio-language model that accepts a text prompt. This is the only open ASR that enables the Wispr-style context-conditioned recognition: we pass the focused app, window title, surrounding text, and dictionary boost terms.
-- **Qwen3-30B-A3B-Instruct-2507 (MoE, 8-bit)** — 30B total, 3B active per token. 30B-class reasoning at 3B-class latency on Apple Silicon. Dramatically outperforms Llama 3B at cleanup without a latency penalty on M5 Max.
-- **Qwen3-235B-A22B-Instruct-2507 (MoE, 4-bit)** — command mode (rewrite-as-email, translate, restructure). 22B active params. Requires ≥128 GB unified memory.
+- **Qwen3-30B-A3B-Instruct-2507 (MoE, 8-bit)** — 30B total, 3B active per token. 30B-class reasoning at 3B-class latency on Apple Silicon. Used for both the cleanup hot path and (reused) Command Mode transformations.
 
 ## Personalization loop
 

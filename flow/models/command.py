@@ -1,6 +1,8 @@
-"""Command mode: heavy Qwen3-235B-A22B for rewrite-as-email, restructure, translate.
+"""Command mode: rewrite-as-email, restructure, translate.
 
-Loaded on demand via a separate hotkey. Not in the hot path of normal dictation.
+Reuses the cleanup LLM (Qwen3-30B-A3B by default) so there's no extra RAM
+cost. Loaded on demand via a separate hotkey. Not in the hot path of normal
+dictation.
 """
 
 from __future__ import annotations

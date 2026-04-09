@@ -115,8 +115,7 @@ Witzper runs real language models in unified memory. How much RAM you have deter
 |---|---|---|
 | **16 GB** | Qwen3 4B (4-bit) or Llama 3.2 3B | Fast, decent quality, 80 ms cleanup |
 | **32 GB** | Qwen3 14B (8-bit) | Near-flagship quality, 180 ms cleanup |
-| **64 GB** | **Qwen3 30B-A3B (8-bit)** ← default | Witzper's sweet spot, 250 ms cleanup |
-| **128 GB** | Qwen3 30B-A3B + Qwen3 235B-A22B (Command Mode) | No-compromise + AI Commands |
+| **64 GB+** | **Qwen3 30B-A3B (8-bit)** ← default | Witzper's sweet spot, 250 ms cleanup |
 
 ### Hard requirements
 - **Mac with Apple Silicon** (M1, M2, M3, M4, M5 — *not* Intel)
@@ -138,7 +137,6 @@ Witzper runs real language models in unified memory. How much RAM you have deter
 | Witzper menu-bar app + dashboard | ~80 MB |
 | Python daemon overhead | ~3 GB |
 | **Total hot path** | **~36 GB** |
-| + Command Mode (Qwen3-235B-A22B, lazy-loaded) | +100 GB |
 
 ### Network
 
@@ -179,15 +177,14 @@ Runs on every utterance. Takes the raw transcript and fixes grammar, punctuation
 - `accuracy` — always Qwen3-ASR with full context injection.
 - `auto` — per-app, driven by `configs/app_rules.toml` (e.g. accuracy in Mail, speed in iMessage).
 
-### 3. Command Mode — heavy, lazy-loaded *(experimental)*
+### 3. Command Mode — lazy-loaded *(experimental)*
 
 A separate hotkey (default `right_cmd+right_option`) triggers Command Mode for transformations like *"rewrite this as an email"*, *"translate to Spanish"*, or *"restructure as bullets"*.
 
 | Model | Label | RAM | Notes |
 |---|---|---|---|
 | `mlx-community/Qwen3-14B-Instruct-2507-4bit` | Qwen3 14B (light) | 8 GB | For 32 GB Macs |
-| `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | Qwen3 30B-A3B (shared) | 0 GB extra | Reuses the cleanup model already in memory |
-| `mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit` | **Qwen3 235B-A22B** *(heavy default)* | ~100 GB | Claude/GPT-class output. Needs a 128 GB Mac. |
+| `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | **Qwen3 30B-A3B (shared — default)** | 0 GB extra | Reuses the cleanup model already in memory |
 
 > **Note**: Command Mode's inference backend (`flow/models/command.py`) is implemented, but the hotkey wiring is not in this release. See [Experimental features](#-experimental--coming-soon).
 
@@ -311,7 +308,7 @@ max_edit_distance_ratio = 0.5
 
 [command]
 enabled = true
-model = "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
+model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
 max_tokens = 2048
 hotkey = "right_cmd+right_option"
 
@@ -392,13 +389,13 @@ See [`docs/architecture.md`](docs/architecture.md) for the full walkthrough.
 
 ---
 
-## 🎯 Target performance (M5 Max, 128 GB)
+## 🎯 Target performance (M-series Max, 64 GB)
 
 | Mode | Components | End-to-end p50 |
 |---|---|---|
 | Speed | Parakeet + Qwen3-30B-A3B | 200–350 ms |
 | Accuracy | Qwen3-ASR + Qwen3-30B-A3B | 350–600 ms |
-| Command Mode | Qwen3-235B-A22B | 2–5 s |
+| Command Mode | Qwen3-30B-A3B (shared) | 800 ms–2 s |
 
 Per-stage budget:
 
@@ -419,7 +416,7 @@ With streaming + pre-flight ASR (IDEAS #1 + #2), the **perceived** latency is cl
 These features live in the codebase but are not fully wired in the current release. Clearly marked so nobody gets surprised:
 
 - **Qwen3-ASR accuracy mode** — the wrapper (`flow/models/qwen3_asr.py`) is ready, but the community `qwen3-asr-mlx` package is still stabilizing. Until it's on PyPI, Witzper falls back to Parakeet and ignores `asr.mode = "accuracy"`. Track progress in [IDEAS.md](IDEAS.md).
-- **Command Mode hotkey** — `flow/models/command.py` runs the 235B model, but the second-hotkey listener that feeds it *"rewrite this email"* style instructions isn't wired yet. Planned as IDEAS #5.
+- **Command Mode hotkey** — `flow/models/command.py` can run transformations using the shared cleanup model, but the second-hotkey listener that feeds it *"rewrite this email"* style instructions isn't wired yet. Planned as IDEAS #5.
 - **ASR LoRA training** — `flow train asr` exports a manifest for the Qwen3-ASR MLX trainer; actual training integration is pending that same port.
 - **DSPy prompt optimization** — dependency is installed under `[personalize]` extras, runner is not yet invoked from cron.
 - **Signed DMG installer** — everything is currently source-installed. A signed `.app` bundle build lives at `scripts/build_app.sh` for personal use.

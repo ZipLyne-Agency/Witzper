@@ -43,7 +43,7 @@ production-quality app.
 
 ## P2 — Command Mode
 
-- [ ] Separate hotkey (right_cmd+right_option) loads Qwen3-235B-A22B lazily
+- [ ] Separate hotkey (right_cmd+right_option) triggers Command Mode using the shared cleanup LLM
 - [ ] Grab selected text from AX on trigger, treat dictation as instruction
 - [ ] Insert result as replacement (not paste) — needs AX `AXSelectedText` setter
 

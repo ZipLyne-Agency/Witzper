@@ -19,7 +19,7 @@ Right now it's pure push-to-talk. Adding an auto-endpoint after ~1.2s of silence
 ⌘⇧Z (or a menu item) restores the field to what it was before the last paste. Implementation is trivial — we already snapshot the clipboard and we know the text we inserted. Saves you when the LLM gets something weird.
 
 ### 5. Edit-the-last-transcript-with-voice
-Hold a different hotkey, say "actually change Tuesday to Wednesday," and Witzper rewrites the *previously inserted text* using the Command Mode model (Qwen3-235B). This is what makes Wispr Flow's "AI Commands" feel magic. We have the 235B model on disk; just need to wire the second hotkey + grab surrounding text via AX and replace it.
+Hold a different hotkey, say "actually change Tuesday to Wednesday," and Witzper rewrites the *previously inserted text* using the shared cleanup LLM (Qwen3-30B-A3B). This is what makes Wispr Flow's "AI Commands" feel magic. The model is already warm in memory; just need to wire the second hotkey + grab surrounding text via AX and replace it.
 
 ### 6. Audible feedback for low confidence
 When the cleanup guardrail fires (raw used instead of cleaned), play a different "Pop" tone so you know the LLM bailed. Trivial UX win, no model changes.
@@ -102,7 +102,7 @@ After insertion, the HUD briefly shows "320 ms" before fading out. Builds trust 
 ## 🚀 Wild ideas (probably 2.0)
 
 ### 26. Voice diff for code
-Select a function in VS Code, hold Command Mode hotkey, say "make this async and add error handling." Qwen3-235B rewrites it. You're already paying for the 235B on disk.
+Select a function in VS Code, hold Command Mode hotkey, say "make this async and add error handling." The shared Qwen3-30B cleanup model rewrites it — zero extra RAM since it's already warm.
 
 ### 27. Witzper-as-a-keyboard
 Replace the macOS dictation system entirely — install Witzper as an Input Method so it works in *any* text field, including ones that block paste/clipboard tricks (password fields, terminal apps, sandboxed apps).
@@ -123,7 +123,7 @@ Watch a sequence of (dictation → edit → dictation → edit) and turn it into
 If we were ranking *what to build next* for the most leverage:
 
 1. **#1 streaming partials in HUD** — biggest "wow this feels like Wispr" delta
-2. **#5 voice command mode (edit last text)** — the actual Wispr "AI Commands" feature; the 235B model is already on disk
+2. **#5 voice command mode (edit last text)** — the actual Wispr "AI Commands" feature; reuses the already-warm cleanup model
 3. **#3 auto-stop / tap-to-toggle** — kills hold-to-talk fatigue
 4. **#10 domain modes (Coding / Email / Notes)** — single biggest accuracy lever after ASR
 5. **#12 + #21 real correction loop + onboarding** — turns it from "demo" into "I use this every day"
