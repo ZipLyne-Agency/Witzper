@@ -19,6 +19,11 @@ struct DictionaryView: View {
 
                 section("BOOST WORDS — preserved verbatim during cleanup",
                         count: store.boosts.count)
+                Text("Passed to the cleanup LLM as vocabulary; Parakeet ASR " +
+                     "ignores them (only Qwen3-ASR accuracy mode consumes " +
+                     "boost terms directly). Capped at 200 terms.")
+                    .font(.bbSmall).foregroundColor(.bbDim)
+                    .padding(.horizontal, 14).padding(.top, 6)
                 boostList
                 addBoostRow
 

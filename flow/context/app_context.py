@@ -90,6 +90,34 @@ class AppContextProvider:
             rule=rule,
         )
 
+    def read_focused_text(self) -> str | None:
+        """Return the full value of the currently focused text field, via
+        the Swift helper. Used by the edit watcher to diff post-insertion
+        edits. Returns None if the helper isn't running or the field
+        doesn't expose AXValue.
+        """
+        if not HELPER_SOCKET.exists():
+            return None
+        try:
+            import socket
+
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.15)
+            s.connect(str(HELPER_SOCKET))
+            s.sendall(b'{"op":"read_focused_text"}\n')
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            s.close()
+            obj = json.loads(data or b"{}")
+            text = obj.get("text")
+            return text if isinstance(text, str) else None
+        except Exception:
+            return None
+
     def _query_helper(self) -> dict | None:
         try:
             import socket

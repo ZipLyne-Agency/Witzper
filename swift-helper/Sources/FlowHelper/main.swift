@@ -227,17 +227,51 @@ final class StreamListener {
     }
 }
 
+// MARK: - Hotkey bindings
+
+/// One configurable shortcut. `flagSet` is the OR of all required modifier
+/// flag bits — single-key bindings have one bit, chords have multiple. The
+/// binding fires when ALL of its bits are simultaneously set in the current
+/// `CGEventFlags`. When two bindings are simultaneously satisfied (e.g. a
+/// single-key binding and a chord that contains it), only the binding with
+/// the maximal flag set fires — see `HotkeyTap.handle`.
+struct HotkeyBinding {
+    let action: String
+    let rawKey: String
+    let flagSet: CGEventFlags
+    var isDown: Bool = false
+    var isCapsLock: Bool { flagSet == .maskAlphaShift }
+}
+
+/// Parse a hotkey name like "fn" or "right_cmd+right_option" into the OR of
+/// the matching CGEventFlags bits. Returns nil if any token is unknown or
+/// the input is empty.
+func parseHotkeyFlags(_ name: String) -> CGEventFlags? {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return nil }
+    var result: CGEventFlags = []
+    for token in trimmed.split(separator: "+") {
+        let key = String(token).trimmingCharacters(in: .whitespaces)
+        guard let hk = Hotkey(rawValue: key) else { return nil }
+        result.insert(hk.flag)
+    }
+    return result.isEmpty ? nil : result
+}
+
 // MARK: - Hotkey tap
 
 final class HotkeyTap {
-    let hotkey: Hotkey
-    let onDown: () -> Void
-    let onUp: () -> Void
+    var bindings: [HotkeyBinding]
+    let onDown: (String) -> Void
+    let onUp: (String) -> Void
     private var tap: CFMachPort?
-    private var isDown = false
 
-    init(hotkey: Hotkey, onDown: @escaping () -> Void, onUp: @escaping () -> Void) {
-        self.hotkey = hotkey
+    init(
+        bindings: [HotkeyBinding],
+        onDown: @escaping (String) -> Void,
+        onUp: @escaping (String) -> Void
+    ) {
+        self.bindings = bindings
         self.onDown = onDown
         self.onUp = onUp
     }
@@ -272,29 +306,56 @@ final class HotkeyTap {
     private func handle(type: CGEventType, event: CGEvent) {
         guard type == .flagsChanged else { return }
         let flags = event.flags
-        // Match on the modifier flag bit alone — this accepts BOTH left and
-        // right side of the modifier (e.g. either Option key triggers).
-        // Trying to distinguish left/right via keycode is unreliable across
-        // keyboards.
-        let pressed = flags.contains(hotkey.flag)
 
-        // For caps lock specifically: pressed=true means the latched LED is on,
-        // which would fire on every toggle. Special-case it as a single-tap
-        // toggle below.
-        if hotkey == .capsLock {
-            if pressed {
-                if !isDown { isDown = true; onDown() }
-                else { isDown = false; onUp() }
+        // 1. Determine which bindings are physically satisfied right now.
+        var satisfied = Set<Int>()
+        for i in bindings.indices {
+            let b = bindings[i]
+            if b.isCapsLock { continue } // handled separately below
+            if !b.flagSet.isEmpty && flags.contains(b.flagSet) {
+                satisfied.insert(i)
             }
-            return
         }
-
-        if pressed && !isDown {
-            isDown = true
-            onDown()
-        } else if !pressed && isDown {
-            isDown = false
-            onUp()
+        // 2. If a chord (cmd+opt) is satisfied, suppress its sub-bindings
+        //    (just-cmd or just-opt). A binding is "primary" only if no
+        //    other satisfied binding is a strict superset of its flagSet.
+        var primary = Set<Int>()
+        for i in satisfied {
+            let me = bindings[i].flagSet
+            var superseded = false
+            for j in satisfied where j != i {
+                let other = bindings[j].flagSet
+                if other.rawValue & me.rawValue == me.rawValue && other != me {
+                    superseded = true
+                    break
+                }
+            }
+            if !superseded { primary.insert(i) }
+        }
+        // 3. Reconcile each binding's down state.
+        for i in bindings.indices where !bindings[i].isCapsLock {
+            let shouldBeDown = primary.contains(i)
+            if shouldBeDown && !bindings[i].isDown {
+                bindings[i].isDown = true
+                onDown(bindings[i].action)
+            } else if !shouldBeDown && bindings[i].isDown {
+                bindings[i].isDown = false
+                onUp(bindings[i].action)
+            }
+        }
+        // 4. Caps lock toggle semantics — the bit is latched, so we treat
+        //    every flagsChanged with caps high as a press transition.
+        let capsHigh = flags.contains(.maskAlphaShift)
+        for i in bindings.indices where bindings[i].isCapsLock {
+            if capsHigh {
+                if !bindings[i].isDown {
+                    bindings[i].isDown = true
+                    onDown(bindings[i].action)
+                } else {
+                    bindings[i].isDown = false
+                    onUp(bindings[i].action)
+                }
+            }
         }
     }
 }
@@ -303,6 +364,28 @@ final class HotkeyTap {
 
 func frontApp() -> NSRunningApplication? {
     NSWorkspace.shared.frontmostApplication
+}
+
+/// Full AXValue read of the currently focused text element. Not truncated
+/// like axSnapshot() — the edit watcher needs the whole value to diff
+/// against the inserted text. Returns nil if the field doesn't expose
+/// AXValue (most Electron apps, terminals, rich-text editors).
+func readFocusedTextFull() -> String? {
+    guard let app = frontApp() else { return nil }
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    var focusedElement: AnyObject?
+    guard AXUIElementCopyAttributeValue(
+        axApp, kAXFocusedUIElementAttribute as CFString, &focusedElement
+    ) == .success, let el = focusedElement else {
+        return nil
+    }
+    var value: AnyObject?
+    guard AXUIElementCopyAttributeValue(
+        el as! AXUIElement, kAXValueAttribute as CFString, &value
+    ) == .success else {
+        return nil
+    }
+    return value as? String
 }
 
 func axSnapshot() -> [String: Any] {
@@ -384,6 +467,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // menu-bar only, no dock icon
+
+        // Install a real main menu so TextField/TextEditor get ⌘C / ⌘V / ⌘X / ⌘A
+        // through the standard first-responder selectors. Without this, paste is
+        // silently dead in an .accessory app — Snippets, Dictionary, any input.
+        installMainMenu()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateIcon(listening: false)
@@ -518,14 +606,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.retainedListener = listener
         let contextServer = UnixSocketServer(path: "/tmp/flow-context.sock", queueLabel: "flow.context")
         contextServer.start(requestHandler: { req in
-            // Two ops: snapshot (default) and insert (paste text via clipboard + ⌘V).
+            // Ops:
+            //   snapshot           — default; full AX context for the focused app
+            //   insert             — paste text via clipboard + ⌘V
+            //   read_focused_text  — full AXValue of the focused field
+            //   get_selection      — selected text in the focused field
+            //                        (used by Command Mode to grab the user's
+            //                        highlighted source text). Also caches
+            //                        the source PID so a later replace can
+            //                        re-target the original window.
+            //   command_result     — show the Command Mode result panel with
+            //                        Copy / Replace Selection / Dismiss.
             if let data = req.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let op = obj["op"] as? String,
-               op == "insert",
-               let text = obj["text"] as? String {
-                Inserter.paste(text: text)
-                return "{\"ok\":true}"
+               let op = obj["op"] as? String {
+                if op == "insert", let text = obj["text"] as? String {
+                    Inserter.paste(text: text)
+                    return "{\"ok\":true}"
+                }
+                if op == "read_focused_text" {
+                    let text = readFocusedTextFull() ?? ""
+                    if let data = try? JSONSerialization.data(
+                        withJSONObject: ["text": text]
+                    ), let s = String(data: data, encoding: .utf8) {
+                        return s
+                    }
+                    return "{\"text\":\"\"}"
+                }
+                if op == "get_selection" {
+                    let snap = axSnapshot()
+                    let sel = (snap["selected_text"] as? String) ?? ""
+                    if let app = NSWorkspace.shared.frontmostApplication {
+                        CommandResultPanel.lastSourcePID = app.processIdentifier
+                    }
+                    if let data = try? JSONSerialization.data(
+                        withJSONObject: ["selected_text": sel]
+                    ), let s = String(data: data, encoding: .utf8) {
+                        return s
+                    }
+                    return "{\"selected_text\":\"\"}"
+                }
+                if op == "command_result" {
+                    let result = (obj["result"] as? String) ?? ""
+                    let instr = (obj["instruction"] as? String) ?? ""
+                    let had = (obj["had_selection"] as? Bool) ?? false
+                    DispatchQueue.main.async {
+                        CommandResultPanel.show(
+                            instruction: instr,
+                            result: result,
+                            hadSelection: had
+                        )
+                    }
+                    return "{\"ok\":true}"
+                }
             }
             let snap = axSnapshot()
             if let data = try? JSONSerialization.data(withJSONObject: snap),
@@ -546,36 +679,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateIconNotTrusted()
         }
 
-        // Start hotkey tap
+        // Start hotkey tap with all configured bindings.
+        let bindings = loadHotkeyBindings(legacyFallback: hotkey)
+        for b in bindings {
+            FileHandle.standardError.write(
+                "flow-helper: binding \(b.action) → \(b.rawKey)\n".data(using: .utf8)!
+            )
+        }
         let tap = HotkeyTap(
-            hotkey: hotkey,
-            onDown: { [weak self] in
-                hotkeyServer.broadcast("{\"type\":\"hotkey_down\"}")
+            bindings: bindings,
+            onDown: { [weak self] action in
+                let line = "{\"type\":\"hotkey_down\",\"action\":\"\(action)\"}"
+                hotkeyServer.broadcast(line)
                 DispatchQueue.main.async {
                     Sounds.playStart()
-                    self?.updateIcon(listening: true)
+                    self?.updateIcon(listening: true, action: action)
                 }
             },
-            onUp: { [weak self] in
-                hotkeyServer.broadcast("{\"type\":\"hotkey_up\"}")
+            onUp: { [weak self] action in
+                let line = "{\"type\":\"hotkey_up\",\"action\":\"\(action)\"}"
+                hotkeyServer.broadcast(line)
                 DispatchQueue.main.async {
                     Sounds.playStop()
-                    self?.updateIcon(listening: false)
+                    self?.updateIcon(listening: false, action: action)
                 }
             }
         )
         tap.start()
         self.retainedTap = tap
+
+        // First-launch onboarding: shows permissions + mic picker flow.
+        if !UserDefaults.standard.bool(forKey: "witzperOnboardingComplete") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                OnboardingWindowController.shared.show()
+            }
+        }
     }
 
     var retainedTap: HotkeyTap?
     var retainedListener: StreamListener?
 
-    func updateIcon(listening: Bool) {
+    func installMainMenu() {
+        let main = NSMenu()
+
+        // App menu (title ignored; macOS uses process name)
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Witzper", action: nil, keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide Witzper",
+                        action: #selector(NSApplication.hide(_:)),
+                        keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Witzper",
+                              action: #selector(NSApplication.terminate(_:)),
+                              keyEquivalent: "q")
+        appMenu.addItem(quit)
+        appItem.submenu = appMenu
+
+        // Edit menu — the whole point of installing a main menu
+        let editItem = NSMenuItem()
+        main.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo",
+                         action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = NSMenuItem(title: "Redo",
+                              action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redo)
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut",
+                         action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy",
+                         action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste",
+                         action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Delete",
+                         action: #selector(NSText.delete(_:)), keyEquivalent: "")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Select All",
+                         action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
+        NSApp.mainMenu = main
+    }
+
+    func updateIcon(listening: Bool, action: String = "dictate") {
         isListening = listening
         if let button = statusItem.button {
-            button.title = listening ? "🔴 Witzper" : "⚪ Witzper"
-            button.toolTip = listening ? "Listening…" : "Witzper ready"
+            let glyph = action == "command" ? "🟣" : "🔴"
+            button.title = listening ? "\(glyph) Witzper" : "⚪ Witzper"
+            button.toolTip = listening
+                ? (action == "command" ? "Command Mode…" : "Listening…")
+                : "Witzper ready"
         }
         if listening {
             HUD.shared.show()
@@ -701,15 +898,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Kill existing python -m flow processes
         let task = Process()
         task.launchPath = "/usr/bin/pkill"
-        task.arguments = ["-f", "python -u -m flow run"]
+        task.arguments = ["-f", "flow run"]
         try? task.run()
         task.waitUntilExit()
-        // Spawn new daemon
+        // Also kill our native launcher if running
+        let task2 = Process()
+        task2.launchPath = "/usr/bin/pkill"
+        task2.arguments = ["-f", "./Witzper --verbose"]
+        try? task2.run()
+        task2.waitUntilExit()
+        // Spawn new daemon — prefer the native ./Witzper launcher so
+        // Activity Monitor shows "Witzper" as the process name.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let script = """
-        cd \(home)/Desktop/flow-local && \
+        cd \(home)/Witzper && \
         source .venv/bin/activate && \
-        nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 &
+        if [[ -x ./Witzper ]]; then \
+          nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
+        else \
+          nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
+        fi
         """
         let spawn = Process()
         spawn.launchPath = "/bin/zsh"
@@ -788,6 +996,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             openAccessibility()
         }
+    }
+}
+
+// MARK: - User config reader
+
+/// Minimal TOML reader: returns sections as `[section name → [key → value]]`.
+/// Strings are unquoted; everything else stays as the raw token. Sufficient
+/// for the small number of fields we read out of `~/.config/Witzper/config.toml`.
+func readUserConfigSections() -> [String: [String: String]] {
+    let path = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/Witzper/config.toml")
+    guard let txt = try? String(contentsOf: path, encoding: .utf8) else { return [:] }
+    var sections: [String: [String: String]] = [:]
+    var current = ""
+    for raw in txt.components(separatedBy: "\n") {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        if s.isEmpty || s.hasPrefix("#") { continue }
+        if s.hasPrefix("[") && s.hasSuffix("]") {
+            current = String(s.dropFirst().dropLast())
+            if sections[current] == nil { sections[current] = [:] }
+            continue
+        }
+        guard let eq = s.firstIndex(of: "=") else { continue }
+        let k = s[..<eq].trimmingCharacters(in: .whitespaces)
+        var v = s[s.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+        if v.hasPrefix("\"") && v.hasSuffix("\"") && v.count >= 2 {
+            v = String(v.dropFirst().dropLast())
+        }
+        if sections[current] == nil { sections[current] = [:] }
+        sections[current]![k] = v
+    }
+    return sections
+}
+
+/// Build the active hotkey binding list from user config. Falls back to
+/// the legacy single-hotkey field (and to the CLI/env override) so older
+/// configs keep working.
+func loadHotkeyBindings(legacyFallback: Hotkey) -> [HotkeyBinding] {
+    var out: [HotkeyBinding] = []
+    let sections = readUserConfigSections()
+
+    // Pull every [hotkeys.<action>] section.
+    var found = false
+    for (name, kv) in sections where name.hasPrefix("hotkeys.") {
+        found = true
+        let action = String(name.dropFirst("hotkeys.".count))
+        guard let key = kv["key"], !key.isEmpty,
+              let flags = parseHotkeyFlags(key) else { continue }
+        out.append(HotkeyBinding(action: action, rawKey: key, flagSet: flags))
+    }
+    if !found {
+        // Default registry: dictate uses the legacy single-key field (or
+        // the CLI fallback), command uses the documented chord.
+        let dictateKey: String
+        if let kv = sections["hotkey"], let k = kv["key"], !k.isEmpty {
+            dictateKey = k
+        } else {
+            dictateKey = legacyFallback.rawValue
+        }
+        if let flags = parseHotkeyFlags(dictateKey) {
+            out.append(HotkeyBinding(
+                action: "dictate", rawKey: dictateKey, flagSet: flags
+            ))
+        }
+        let chord = "right_cmd+right_option"
+        if let flags = parseHotkeyFlags(chord) {
+            out.append(HotkeyBinding(
+                action: "command", rawKey: chord, flagSet: flags
+            ))
+        }
+    }
+    return out
+}
+
+// MARK: - Command Mode result panel
+
+/// Small modal panel shown after Command Mode finishes a transformation.
+/// Buttons: Copy (always), Replace Selection (only if the user had a real
+/// AX selection at trigger time), Dismiss. Replace re-targets the original
+/// app via the cached PID so the alert stealing focus doesn't matter.
+enum CommandResultPanel {
+    static var lastSourcePID: pid_t = 0
+
+    static func show(instruction: String, result: String, hadSelection: Bool) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Command: \(instruction)"
+        // NSAlert truncates long bodies; cap so the panel stays usable.
+        let preview = result.count > 1500
+            ? String(result.prefix(1500)) + "\n…"
+            : result
+        alert.informativeText = preview
+        alert.addButton(withTitle: "Copy")
+        if hadSelection {
+            alert.addButton(withTitle: "Replace Selection")
+        }
+        alert.addButton(withTitle: "Dismiss")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(result, forType: .string)
+        } else if hadSelection && response == .alertSecondButtonReturn {
+            replaceSelection(with: result)
+        }
+    }
+
+    /// Activate the source app and write the result back. Tries the AX
+    /// `kAXSelectedTextAttribute` setter first (works in Xcode, Notes,
+    /// Mail, most native text fields), falls back to clipboard + ⌘V.
+    private static func replaceSelection(with text: String) {
+        if lastSourcePID != 0,
+           let app = NSRunningApplication(processIdentifier: lastSourcePID) {
+            app.activate(options: .activateIgnoringOtherApps)
+            // Give the activation ~150ms to land before we touch AX/paste.
+            Thread.sleep(forTimeInterval: 0.15)
+            let axApp = AXUIElementCreateApplication(lastSourcePID)
+            var focused: AnyObject?
+            if AXUIElementCopyAttributeValue(
+                axApp,
+                kAXFocusedUIElementAttribute as CFString,
+                &focused
+            ) == .success, let el = focused {
+                let setResult = AXUIElementSetAttributeValue(
+                    el as! AXUIElement,
+                    kAXSelectedTextAttribute as CFString,
+                    text as CFString
+                )
+                if setResult == .success { return }
+            }
+        }
+        Inserter.paste(text: text)
     }
 }
 

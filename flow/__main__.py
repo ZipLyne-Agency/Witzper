@@ -24,6 +24,17 @@ def run(
     import os
     import signal as _sig
 
+    # Rename the process so `ps`, `top`, and Activity Monitor's Command
+    # column show "Witzper" instead of "Python". Activity Monitor's
+    # "Process Name" column is fixed by the kernel to the exec'd binary
+    # basename (still "Python") — see the launcher shim in scripts/run.sh
+    # for the full rename.
+    try:
+        import setproctitle
+        setproctitle.setproctitle("Witzper")
+    except Exception:
+        pass
+
     pid_path = Path("/tmp/Witzper.pid")
     if pid_path.exists():
         try:

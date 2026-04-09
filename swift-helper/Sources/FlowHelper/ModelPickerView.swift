@@ -15,6 +15,7 @@ struct ModelPickerView: View {
 
     @State private var selectedId: String
     @State private var statusText: String = ""
+    @ObservedObject private var downloads = DownloadManager.shared
 
     init(
         title: String,
@@ -115,26 +116,66 @@ struct ModelPickerView: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 10) {
-            let downloaded = ModelStatus.isDownloaded(selectedId)
-            if !downloaded {
-                bbButton("DOWNLOAD") {
-                    downloadSelected()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                let downloaded = ModelStatus.isDownloaded(selectedId)
+                let dl = downloads.state[selectedId]
+                let isDownloading = dl?.isRunning ?? false
+                if !downloaded && !isDownloading {
+                    bbButton("DOWNLOAD") { downloadSelected() }
                 }
+                if isDownloading {
+                    bbButton("CANCEL") { downloads.cancel(modelId: selectedId) }
+                }
+                bbButton("APPLY + RESTART") { applySelected() }
+                    .disabled(!downloaded)
+                    .opacity(downloaded ? 1.0 : 0.4)
+                if !statusText.isEmpty {
+                    Text(statusText)
+                        .font(.bbSmall).foregroundColor(.bbAmber)
+                }
+                Spacer()
             }
-            bbButton("APPLY + RESTART") {
-                applySelected()
+            if let dl = downloads.state[selectedId], dl.isRunning || dl.error != nil {
+                downloadProgressBar(dl)
             }
-            .disabled(!downloaded)
-            .opacity(downloaded ? 1.0 : 0.4)
-            if !statusText.isEmpty {
-                Text(statusText)
-                    .font(.bbSmall)
-                    .foregroundColor(.bbAmber)
-            }
-            Spacer()
         }
         .padding(.top, 6)
+    }
+
+    private func downloadProgressBar(_ dl: DownloadState) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color(white: 0.1))
+                    Rectangle()
+                        .fill(dl.error == nil ? Color.bbGreen : Color.bbRed)
+                        .frame(width: geo.size.width * CGFloat(min(max(dl.progress, 0.02), 1.0)))
+                }
+            }
+            .frame(height: 6)
+            HStack(spacing: 8) {
+                if let err = dl.error {
+                    Text("ERROR: \(err)")
+                        .font(.bbSmall).foregroundColor(.bbRed)
+                } else {
+                    Text(String(format: "%.0f%%  %@  ·  %@ / %@",
+                                dl.progress * 100,
+                                dl.isRunning ? "downloading" : "done",
+                                formatBytes(dl.bytesDownloaded),
+                                formatBytes(dl.bytesExpected)))
+                        .font(.bbSmall).foregroundColor(.bbDim)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func formatBytes(_ n: Int64) -> String {
+        let gb = Double(n) / 1_000_000_000
+        if gb >= 1 { return String(format: "%.1f GB", gb) }
+        let mb = Double(n) / 1_000_000
+        return String(format: "%.0f MB", mb)
     }
 
     private func bbButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -158,19 +199,13 @@ struct ModelPickerView: View {
     // ---- Actions ----------------------------------------------------
 
     private func downloadSelected() {
-        statusText = "downloading… (Terminal opens)"
-        let cmd = "/opt/homebrew/bin/hf download \(selectedId)"
-        // Open Terminal so the user sees progress
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd ~/Desktop/flow-local && source .venv/bin/activate && \(cmd)"
-        end tell
-        """
-        let p = Process()
-        p.launchPath = "/usr/bin/osascript"
-        p.arguments = ["-e", script]
-        try? p.run()
+        guard let opt = options.first(where: { $0.id == selectedId }) else { return }
+        statusText = ""
+        // Rough expected size: use approxRamGB as a proxy, clamped so the
+        // progress bar always moves (the real on-disk footprint is close to
+        // the RAM footprint for MLX weights).
+        let expectedBytes = Int64(max(opt.approxRamGB, 0.2) * 1_000_000_000)
+        DownloadManager.shared.start(modelId: selectedId, expectedBytes: expectedBytes)
     }
 
     private func applySelected() {
@@ -285,10 +320,14 @@ enum DaemonControl {
     static func restart() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let script = """
-        cd \(home)/Desktop/flow-local && source .venv/bin/activate && \
-        pkill -9 -f 'python -u -m flow' ; sleep 1 ; \
+        cd \(home)/Witzper && source .venv/bin/activate && \
+        pkill -9 -f 'flow run' ; pkill -9 -f 'Witzper.*--verbose' ; sleep 1 ; \
         rm -f /tmp/Witzper.pid ; \
-        PATH=/opt/homebrew/bin:$PATH nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 &
+        if [[ -x ./Witzper ]]; then \
+          PATH=/opt/homebrew/bin:$PATH nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
+        else \
+          PATH=/opt/homebrew/bin:$PATH nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
+        fi
         """
         let p = Process()
         p.launchPath = "/bin/zsh"

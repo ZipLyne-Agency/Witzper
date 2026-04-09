@@ -97,8 +97,19 @@ class SnippetStore:
 
         # Whole-word, case-insensitive substring replacement, longest first
         # so that "my work email address" wins over "my email" if both exist.
+        #
+        # For multi-word triggers we tolerate arbitrary whitespace *and* any
+        # stray punctuation the cleanup LLM may have inserted between the
+        # words (e.g. "my sig" → "My, sig." → still fires). Each gap between
+        # tokens is allowed to match [\s.,;:!?-]+.
         out = text
         for s in sorted(snippets, key=lambda x: -len(x.trigger)):
-            pattern = re.compile(rf"\b{re.escape(s.trigger)}\b", re.IGNORECASE)
-            out = pattern.sub(s.expansion, out)
+            tokens = s.trigger.split()
+            if len(tokens) > 1:
+                gap = r"[\s.,;:!?\-]+"
+                inner = gap.join(re.escape(t) for t in tokens)
+                pattern = re.compile(rf"(?<!\w){inner}(?!\w)", re.IGNORECASE)
+            else:
+                pattern = re.compile(rf"\b{re.escape(s.trigger)}\b", re.IGNORECASE)
+            out = pattern.sub(lambda _m, exp=s.expansion: exp, out)
         return out

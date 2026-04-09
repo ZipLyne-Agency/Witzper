@@ -13,8 +13,24 @@ USER_CONFIG_PATH = Path.home() / ".config" / "Witzper" / "config.toml"
 
 
 class HotkeyCfg(BaseModel):
+    """Legacy single-hotkey config. Superseded by `hotkeys` (action map),
+    but kept so old user configs keep parsing. `load_config` migrates this
+    into `hotkeys["dictate"]` on read.
+    """
+
     key: str = "fn"
     toggle_mode: bool = False
+
+
+class HotkeyBinding(BaseModel):
+    """One configurable shortcut. `key` is a hotkey name like ``fn`` or a
+    chord like ``right_cmd+right_option``. ``mode`` is ``hold`` (push-to-
+    talk) or ``tap`` (single-press toggle, not yet implemented for chords).
+    Empty `key` disables the binding.
+    """
+
+    key: str = ""
+    mode: Literal["hold", "tap"] = "hold"
 
 
 class AudioCfg(BaseModel):
@@ -65,7 +81,8 @@ class CommandCfg(BaseModel):
     enabled: bool = True
     model: str
     max_tokens: int = 2048
-    hotkey: str = "right_cmd+right_option"
+    # Legacy: hotkey now lives in [hotkeys.command]. Kept for back-compat.
+    hotkey: str = ""
 
 
 class InsertionCfg(BaseModel):
@@ -106,8 +123,16 @@ class SnippetsCfg(BaseModel):
     strip_trailing_punct_on_solo_trigger: bool = True
 
 
+def _default_hotkeys() -> dict[str, HotkeyBinding]:
+    return {
+        "dictate": HotkeyBinding(key="fn", mode="hold"),
+        "command": HotkeyBinding(key="right_cmd+right_option", mode="hold"),
+    }
+
+
 class Config(BaseModel):
     hotkey: HotkeyCfg = Field(default_factory=HotkeyCfg)
+    hotkeys: dict[str, HotkeyBinding] = Field(default_factory=_default_hotkeys)
     audio: AudioCfg = Field(default_factory=AudioCfg)
     vad: VadCfg = Field(default_factory=VadCfg)
     asr: AsrCfg
@@ -135,7 +160,26 @@ def load_config(path: Path | None = None) -> Config:
     with DEFAULT_CONFIG_PATH.open("rb") as f:
         data = tomli.load(f)
     candidate = path or (USER_CONFIG_PATH if USER_CONFIG_PATH.exists() else None)
+    user_data: dict = {}
     if candidate and candidate.exists():
         with candidate.open("rb") as f:
-            data = _merge(data, tomli.load(f))
+            user_data = tomli.load(f)
+
+    # Migrate legacy keys *before* merging so user configs that only set
+    # `[hotkey] key = "..."` or `[command] hotkey = "..."` keep working.
+    if isinstance(user_data.get("hotkey"), dict) and "key" in user_data["hotkey"]:
+        user_data.setdefault("hotkeys", {})
+        user_data["hotkeys"].setdefault(
+            "dictate", {"key": user_data["hotkey"]["key"], "mode": "hold"}
+        )
+    if (
+        isinstance(user_data.get("command"), dict)
+        and user_data["command"].get("hotkey")
+    ):
+        user_data.setdefault("hotkeys", {})
+        user_data["hotkeys"].setdefault(
+            "command", {"key": user_data["command"]["hotkey"], "mode": "hold"}
+        )
+
+    data = _merge(data, user_data)
     return Config(**data)

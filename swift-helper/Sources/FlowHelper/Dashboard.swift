@@ -348,35 +348,7 @@ struct DashboardView: View {
     }
 
     private func transcriptCard(_ entry: DashboardState.TranscriptEntry) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(timeOnly(entry.timestamp))
-                    .font(.bbSmall).foregroundColor(.bbDim)
-                Text(entry.app.uppercased())
-                    .font(.bbSmall).foregroundColor(.bbCyan)
-                if !entry.style.isEmpty {
-                    Text("·").font(.bbSmall).foregroundColor(.bbDim)
-                    Text(entry.style.uppercased())
-                        .font(.bbSmall).foregroundColor(styleColor(entry.style))
-                }
-                Spacer()
-                Text(String(format: "%.0f ms", entry.totalMs))
-                    .font(.bbSmall).foregroundColor(.bbAmber)
-            }
-            Text("RAW  ▸ \(entry.raw)")
-                .font(.bbBody).foregroundColor(.bbDim)
-                .textSelection(.enabled)
-            Text("OUT  ▸ \(entry.cleaned)")
-                .font(.bbBody).foregroundColor(.bbGreen)
-                .textSelection(.enabled)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(white: 0.05))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.bbBorder, lineWidth: 1)
-        )
+        TranscriptCardView(entry: entry, styleColor: styleColor(entry.style))
     }
 
     // MARK: right panel — controls + level
@@ -507,6 +479,70 @@ struct DashboardView: View {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f.string(from: Date())
+    }
+
+    private func timeOnly(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: d)
+    }
+}
+
+// MARK: - Transcript card (own view so it can hold copy-flash state)
+
+struct TranscriptCardView: View {
+    let entry: DashboardState.TranscriptEntry
+    let styleColor: Color
+    @State private var copied: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(timeOnly(entry.timestamp))
+                    .font(.bbSmall).foregroundColor(.bbDim)
+                Text(entry.app.uppercased())
+                    .font(.bbSmall).foregroundColor(.bbCyan)
+                if !entry.style.isEmpty {
+                    Text("·").font(.bbSmall).foregroundColor(.bbDim)
+                    Text(entry.style.uppercased())
+                        .font(.bbSmall).foregroundColor(styleColor)
+                }
+                Spacer()
+                Text(String(format: "%.0f ms", entry.totalMs))
+                    .font(.bbSmall).foregroundColor(.bbAmber)
+                Button(action: copy) {
+                    Text(copied ? "COPIED" : "COPY")
+                        .font(.bbSmall)
+                        .foregroundColor(copied ? .bbGreen : .bbAmber)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .overlay(RoundedRectangle(cornerRadius: 2)
+                            .stroke(copied ? Color.bbGreen : Color.bbAmber, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Copy transcript to clipboard")
+            }
+            Text("RAW  ▸ \(entry.raw)")
+                .font(.bbBody).foregroundColor(.bbDim)
+                .textSelection(.enabled)
+            Text("OUT  ▸ \(entry.cleaned)")
+                .font(.bbBody).foregroundColor(.bbGreen)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(white: 0.05))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.bbBorder, lineWidth: 1)
+        )
+    }
+
+    private func copy() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(entry.cleaned, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
     }
 
     private func timeOnly(_ d: Date) -> String {

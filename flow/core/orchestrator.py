@@ -15,11 +15,13 @@ from flow.context.few_shot import FewShotRetriever
 from flow.context.styles import StyleResolver
 from flow.personalize.snippets import SnippetStore
 from flow.core.audio import AudioCapture
-from flow.core.hotkey import HotkeyListener
+from flow.core.command_mode import CommandModeController
+from flow.core.hotkey import HotkeyRouter
 from flow.core.vad import make_vad
 from flow.insert.inserter import Inserter
 from flow.models.asr_base import ASRBackend, ASRResult
 from flow.models.cleanup import CleanupLLM
+from flow.models.command import CommandLLM
 from flow.models.parakeet import ParakeetASR
 from flow.models.qwen3_asr import Qwen3ASR
 from flow.models.whisper_mlx import WhisperASR
@@ -67,6 +69,18 @@ class Orchestrator:
         self.asr_accuracy: ASRBackend | None = None  # lazy
         console.print("[dim]loading cleanup LLM...[/]")
         self.cleanup = CleanupLLM(cfg.cleanup)
+
+        # Command Mode shares audio + speed ASR with the dictate path. The
+        # transform LLM is lazy-loaded on first invocation so it costs no
+        # RAM until the user actually triggers it.
+        self.command_llm = CommandLLM(cfg.command)
+        self.command_ctrl = CommandModeController(
+            cfg=cfg,
+            audio=self.audio,
+            asr=self.asr_speed,
+            llm=self.command_llm,
+            verbose=verbose,
+        )
 
         # Start the dashboard event stream socket
         stream.get_server()
@@ -293,14 +307,22 @@ class Orchestrator:
         if app_ctx.surrounding_text:
             parts.append(f"Context: {app_ctx.surrounding_text[:500]}")
         if boost_terms:
+            if len(boost_terms) > 200 and self.verbose:
+                console.print(
+                    f"[yellow]dictionary boost truncated: {len(boost_terms)} → 200 terms[/]"
+                )
             parts.append("Vocabulary: " + ", ".join(boost_terms[:200]))
         return " ".join(parts) or None
 
     # ---- Main loop --------------------------------------------------------
 
     async def run_forever(self) -> None:
-        listener = HotkeyListener(
-            key=self.cfg.hotkey.key, on_down=self.on_down, on_up=self.on_up
-        )
-        console.print("[green]ready.[/] hold the hotkey to dictate.")
-        await listener.run()
+        router = HotkeyRouter()
+        router.register("dictate", self.on_down, self.on_up)
+        if self.cfg.command.enabled:
+            router.register(
+                "command", self.command_ctrl.on_down, self.command_ctrl.on_up
+            )
+        actions = ", ".join(router.actions())
+        console.print(f"[green]ready.[/] actions: {actions}")
+        await router.run()

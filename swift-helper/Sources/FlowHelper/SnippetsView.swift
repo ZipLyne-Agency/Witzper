@@ -9,6 +9,10 @@ struct SnippetsView: View {
     @State private var pendingDelete: Snippet? = nil
     @State private var showDeleteAlert: Bool = false
     @State private var formError: String? = nil
+    /// When set, the add form is editing this existing snippet instead of
+    /// creating a new one. We delete the original on save if the trigger
+    /// was renamed.
+    @State private var editingOriginalTrigger: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -90,13 +94,25 @@ struct SnippetsView: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: {
+                editingOriginalTrigger = snip.trigger
+                newTrigger = snip.trigger
+                newExpansion = snip.expansion
+                formError = nil
+            }) {
+                Text("✎")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.bbAmber)
+                    .frame(width: 26)
+            }
+            .buttonStyle(.plain)
+            Button(action: {
                 pendingDelete = snip
                 showDeleteAlert = true
             }) {
                 Text("×")
                     .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundColor(.bbRed)
-                    .frame(width: 40)
+                    .frame(width: 30)
             }
             .buttonStyle(.plain)
         }
@@ -106,9 +122,22 @@ struct SnippetsView: View {
 
     private var addForm: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ADD NEW")
-                .font(.bbHeader).foregroundColor(.bbAmber)
-                .padding(.top, 10)
+            HStack {
+                Text(editingOriginalTrigger == nil ? "ADD NEW" : "EDIT SNIPPET")
+                    .font(.bbHeader).foregroundColor(.bbAmber)
+                if editingOriginalTrigger != nil {
+                    Button(action: cancelEdit) {
+                        Text("CANCEL")
+                            .font(.bbSmall).foregroundColor(.bbDim)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .overlay(RoundedRectangle(cornerRadius: 2)
+                                .stroke(Color.bbBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.top, 10)
 
             HStack(alignment: .top, spacing: 10) {
                 Text("TRIGGER:")
@@ -151,7 +180,7 @@ struct SnippetsView: View {
                 }
                 Spacer()
                 Button(action: addSnippet) {
-                    Text("ADD SNIPPET")
+                    Text(editingOriginalTrigger == nil ? "ADD SNIPPET" : "SAVE CHANGES")
                         .font(.bbHeader).foregroundColor(.bbAmber)
                         .padding(.horizontal, 14).padding(.vertical, 6)
                         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.bbAmber, lineWidth: 1))
@@ -171,10 +200,23 @@ struct SnippetsView: View {
             return
         }
         if store.add(trigger: t, expansion: newExpansion) {
+            // If we were editing and the trigger was renamed, delete the old row.
+            if let original = editingOriginalTrigger,
+               original.lowercased() != t.lowercased() {
+                _ = store.delete(trigger: original)
+            }
             newTrigger = ""
             newExpansion = ""
+            editingOriginalTrigger = nil
         } else {
             formError = store.lastError ?? "failed to save"
         }
+    }
+
+    private func cancelEdit() {
+        editingOriginalTrigger = nil
+        newTrigger = ""
+        newExpansion = ""
+        formError = nil
     }
 }

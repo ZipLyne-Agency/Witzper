@@ -2,10 +2,23 @@
 # Override by copying to ~/.config/Witzper/config.toml
 
 [hotkey]
-# Push-to-talk key. Options: "fn", "right_option", "right_cmd", "caps_lock"
+# Legacy single-key config — superseded by [hotkeys.*] below.
+# Kept so old user configs keep parsing. New code reads [hotkeys.*].
 key = "fn"
-# If true, single-tap toggles instead of hold-to-talk
 toggle_mode = false
+
+# Per-action shortcut bindings. Each action gets its own key.
+# `key` accepts a single key ("fn", "right_option", "right_cmd",
+# "right_shift", "caps_lock") or a chord like "right_cmd+right_option".
+# `mode` is "hold" (push-to-talk) or "tap" (single-press toggle).
+# Set key = "" to disable an action.
+[hotkeys.dictate]
+key = "fn"
+mode = "hold"
+
+[hotkeys.command]
+key = "right_cmd+right_option"
+mode = "hold"
 
 [audio]
 sample_rate = 16000
@@ -63,7 +76,8 @@ max_edit_distance_ratio = 0.5
 enabled = true
 model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
 max_tokens = 2048
-hotkey = "right_cmd+right_option"
+# Hotkey moved to [hotkeys.command]. Left blank for back-compat.
+hotkey = ""
 
 [insertion]
 # "paste" = clipboard + ⌘V (fast, works everywhere except password fields)
