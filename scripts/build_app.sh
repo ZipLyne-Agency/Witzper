@@ -122,6 +122,12 @@ if [[ "${WITZPER_SKIP_PYTHON_BUNDLE:-0}" != "1" ]]; then
     mkdir -p "$(dirname "${PY_ROOT}")"
     cp -RL "${UV_PY_ROOT}" "${PY_ROOT}"
 
+    # uv's managed CPython ships a PEP 668 marker that pip refuses to
+    # touch ("This environment is externally managed"). That's correct
+    # for uv's *canonical* install, but we've copied the tree into our
+    # own bundle — it's no longer managed by uv, so the marker must go.
+    find "${PY_ROOT}" -name "EXTERNALLY-MANAGED" -delete 2>/dev/null || true
+
     # 3. Install flow + runtime deps into the bundled python's site-
     #    packages directly. No venv. We use pip via `python -m pip` against
     #    the bundled interpreter itself — it's already ensurepip-enabled.
