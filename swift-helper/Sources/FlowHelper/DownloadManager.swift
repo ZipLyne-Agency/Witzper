@@ -86,21 +86,21 @@ final class DownloadManager: ObservableObject {
             p.standardError = log
         }
 
-        p.terminationHandler = { [weak self] proc in
+        p.terminationHandler = { proc in
             Task { @MainActor in
-                guard let self else { return }
-                self.timers[modelId]?.invalidate()
-                self.timers.removeValue(forKey: modelId)
-                self.processes.removeValue(forKey: modelId)
-                var s = self.state[modelId] ?? DownloadState(modelId: modelId)
+                let mgr = DownloadManager.shared
+                mgr.timers[modelId]?.invalidate()
+                mgr.timers.removeValue(forKey: modelId)
+                mgr.processes.removeValue(forKey: modelId)
+                var s = mgr.state[modelId] ?? DownloadState(modelId: modelId)
                 s.isRunning = false
-                s.bytesDownloaded = self.currentCacheSize(for: modelId)
+                s.bytesDownloaded = mgr.currentCacheSize(for: modelId)
                 if proc.terminationStatus != 0 && !ModelStatus.isDownloaded(modelId) {
                     s.error = "hf download exited \(proc.terminationStatus)"
                 } else {
                     s.bytesExpected = max(s.bytesExpected, s.bytesDownloaded)
                 }
-                self.state[modelId] = s
+                mgr.state[modelId] = s
             }
         }
 
@@ -116,17 +116,17 @@ final class DownloadManager: ObservableObject {
         }
 
         // Poll cache dir size every 500 ms.
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             Task { @MainActor in
-                guard let self else { return }
-                guard var s = self.state[modelId], s.isRunning else { return }
-                s.bytesDownloaded = self.currentCacheSize(for: modelId)
+                let mgr = DownloadManager.shared
+                guard var s = mgr.state[modelId], s.isRunning else { return }
+                s.bytesDownloaded = mgr.currentCacheSize(for: modelId)
                 // If the folder already exceeds our estimate, grow the estimate
                 // so the bar still makes sense.
                 if s.bytesDownloaded > s.bytesExpected {
                     s.bytesExpected = s.bytesDownloaded + 100_000_000
                 }
-                self.state[modelId] = s
+                mgr.state[modelId] = s
             }
         }
         RunLoop.main.add(timer, forMode: .common)

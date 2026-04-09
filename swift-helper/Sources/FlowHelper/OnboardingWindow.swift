@@ -54,12 +54,12 @@ final class OnboardingState: ObservableObject {
     func startPolling() {
         refreshMics()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             Task { @MainActor in
-                guard let self else { return }
-                self.axGranted = OnboardingPermission.accessibilityGranted
-                self.imGranted = OnboardingPermission.inputMonitoringGranted
-                self.micGranted = OnboardingPermission.microphoneGranted
+                let st = OnboardingState.shared
+                st.axGranted = OnboardingPermission.accessibilityGranted
+                st.imGranted = OnboardingPermission.inputMonitoringGranted
+                st.micGranted = OnboardingPermission.microphoneGranted
             }
         }
         RunLoop.main.add(timer!, forMode: .common)
