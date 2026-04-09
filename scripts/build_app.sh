@@ -64,7 +64,75 @@ else
     echo "⚠ assets/AppIcon.icns missing — run scripts/build_icon.py to generate it"
 fi
 
-# Ad-hoc sign so it runs without Gatekeeper friction
+# ----------------------------------------------------------------------------
+# Bundle the Python daemon inside Contents/Resources/
+# ----------------------------------------------------------------------------
+# We embed a fully self-contained CPython (via uv's python-build-standalone)
+# plus all of flow's dependencies so end-users don't need to clone the repo,
+# install Python, or run `uv sync`. On first launch, the Swift helper spawns
+# the bundled interpreter directly.
+#
+# Source layout inside the bundle:
+#   Contents/Resources/python/             — relocatable venv (python+deps)
+#   Contents/Resources/flow/               — flow package source (live)
+#   Contents/Resources/configs/            — default TOML + app rules
+#
+# Skipped when WITZPER_SKIP_PYTHON_BUNDLE=1 (dev builds iterating on Swift
+# only, where the ~4 GB venv build dominates wall time).
+if [[ "${WITZPER_SKIP_PYTHON_BUNDLE:-0}" != "1" ]]; then
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "ERROR: uv is required to bundle the Python daemon." >&2
+        echo "       install: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+        echo "       or skip:  WITZPER_SKIP_PYTHON_BUNDLE=1 $0" >&2
+        exit 1
+    fi
+
+    PY_ROOT="${RES}/python"
+    echo "→ bundling Python runtime into ${PY_ROOT}"
+    rm -rf "${PY_ROOT}"
+
+    # Create a relocatable venv backed by uv's managed python-build-standalone
+    # interpreter. --relocatable rewrites the venv's scripts to resolve
+    # sys.prefix at runtime instead of hardcoding the build-time path, so the
+    # venv keeps working after the .app is dragged into /Applications.
+    uv venv \
+        --python 3.13 \
+        --python-preference only-managed \
+        --relocatable \
+        "${PY_ROOT}"
+
+    # Install flow + all runtime deps into the bundled venv. We install the
+    # package (`.`) rather than just its deps so `python -m flow` resolves,
+    # but at launch we prepend Contents/Resources to PYTHONPATH so the live
+    # source under Resources/flow/ shadows the installed copy — this means
+    # the configs/ sibling that flow.config expects via __file__/../configs
+    # resolves correctly.
+    uv pip install \
+        --python "${PY_ROOT}/bin/python" \
+        --no-cache \
+        .
+
+    echo "→ copying flow source and configs into Resources"
+    rm -rf "${RES}/flow" "${RES}/configs"
+    cp -R flow "${RES}/flow"
+    cp -R configs "${RES}/configs"
+
+    # Strip obvious dead weight from the bundled venv to keep the zip/dmg
+    # download reasonable. MLX + torch still dominate, but every MB helps.
+    find "${PY_ROOT}" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+    find "${PY_ROOT}" -type d -name "tests" -prune -exec rm -rf {} + 2>/dev/null || true
+    find "${PY_ROOT}" -type f -name "*.pyc" -delete 2>/dev/null || true
+
+    PY_SIZE="$(du -sh "${PY_ROOT}" 2>/dev/null | awk '{print $1}')"
+    echo "  bundled python: ${PY_SIZE}"
+else
+    echo "→ skipping python bundle (WITZPER_SKIP_PYTHON_BUNDLE=1)"
+fi
+
+# Ad-hoc sign so it runs without Gatekeeper friction. --deep recursively
+# signs every embedded binary in Contents/Resources/python (python3, each
+# .dylib, each .so). Without this, the first-launch spawn of the bundled
+# interpreter would be killed by macOS with a code-signing violation.
 codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
 
 echo "✔ built ${APP_DIR} (v${VERSION} build ${BUILD_NUMBER})"

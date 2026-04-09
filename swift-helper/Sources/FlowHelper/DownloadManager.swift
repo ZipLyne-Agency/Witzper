@@ -41,18 +41,23 @@ final class DownloadManager: ObservableObject {
             error: nil
         )
 
-        // Locate the repo root. GUI-launched apps don't inherit shell PATH,
-        // so we can't rely on `hf` being discoverable — we have to search a
-        // list of likely venv locations explicitly. Priority:
-        //   1. $FLOW_REPO_ROOT            — explicit override for advanced users
-        //   2. ~/Witzper                  — canonical dev install
-        //   3. ~/Desktop/flow-local       — historical path kept for existing users
-        //   4. homebrew / system PATH     — for a global `hf` install
-        //   5. python3 -m huggingface_hub — last resort, pip-installs on the fly
+        // Locate `hf`. GUI-launched apps don't inherit shell PATH, so we
+        // search explicit locations in priority order:
+        //   1. Bundled runtime            — Contents/Resources/python/bin/hf
+        //                                   (shipped path — works out of the box)
+        //   2. $FLOW_REPO_ROOT            — explicit override for advanced users
+        //   3. ~/Witzper                  — canonical dev install
+        //   4. ~/Desktop/flow-local       — historical path kept for existing users
+        //   5. homebrew / system PATH     — for a global `hf` install
+        //   6. python3 -m huggingface_hub — last resort, pip-installs on the fly
+        let bundledHF = (Bundle.main.resourcePath ?? "") + "/python/bin/hf"
         let p = Process()
         p.launchPath = "/bin/zsh"
         let script = """
         set -e
+        if [[ -x '\(bundledHF)' ]]; then
+            exec '\(bundledHF)' download \(modelId)
+        fi
         candidates=()
         [[ -n "$FLOW_REPO_ROOT" ]] && candidates+=("$FLOW_REPO_ROOT")
         candidates+=("$HOME/Witzper" "$HOME/Desktop/flow-local")

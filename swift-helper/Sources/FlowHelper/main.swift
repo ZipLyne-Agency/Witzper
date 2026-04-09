@@ -1011,22 +1011,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         spawnPythonDaemon()
     }
 
-    /// Spawn the daemon unconditionally. Tries the native ./Witzper launcher
-    /// first (shows "Witzper" in Activity Monitor), falls back to plain
-    /// ``python -m flow run``. Both are detached via nohup+background so
-    /// they outlive the Swift helper's own lifecycle if it crashes.
+    /// Spawn the daemon unconditionally. Prefers the Python runtime bundled
+    /// inside Witzper.app/Contents/Resources/python (shipped in release
+    /// builds) so end-users don't need a cloned repo or system Python. Falls
+    /// back to the dev layout (~/Witzper/.venv) when running from a build
+    /// tree. Detached via nohup+background so it outlives the Swift helper.
     func spawnPythonDaemon() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let script = """
-        cd \(home)/Witzper && \
-        if [[ -f .venv/bin/activate ]]; then source .venv/bin/activate; fi && \
-        export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH && \
-        if [[ -x ./Witzper ]]; then \
-          nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
-        else \
-          nohup python3 -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
-        fi
-        """
+        let script = buildDaemonLaunchScript()
         let spawn = Process()
         spawn.launchPath = "/bin/zsh"
         spawn.arguments = ["-c", script]
@@ -1037,6 +1028,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "Witzper: failed to spawn daemon: \(error)\n".data(using: .utf8)!
             )
         }
+    }
+
+    /// Build the zsh one-liner that launches the flow daemon. Shared by
+    /// ``spawnPythonDaemon`` and ``restartPythonDaemon`` so the resolution
+    /// order for python+flow source stays in one place.
+    ///
+    /// Resolution order:
+    ///  1. **Bundled runtime** — Contents/Resources/python/bin/python with
+    ///     Contents/Resources on PYTHONPATH. This is the shipped path.
+    ///  2. **Dev repo** — ~/Witzper/.venv/bin/python with the repo on CWD.
+    ///     Used when running from a source build that set WITZPER_SKIP_
+    ///     PYTHON_BUNDLE=1 or when iterating locally.
+    private func buildDaemonLaunchScript() -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let resources = Bundle.main.resourcePath ?? ""
+        // Use single-quoted shell literals so spaces in the bundle path
+        // (e.g. "/Applications/Witzper.app/Contents/Resources") survive.
+        let bundledPython = "\(resources)/python/bin/python"
+        let bundledPyPath = resources
+        return """
+        export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH
+        if [[ -x '\(bundledPython)' ]]; then
+          # Shipped path: bundled python-build-standalone + deps.
+          # PYTHONPATH puts Resources/flow (with its configs/ sibling) in
+          # front of the installed site-packages copy so flow.config's
+          # __file__-relative lookups resolve correctly.
+          export PYTHONPATH='\(bundledPyPath)'
+          cd '\(bundledPyPath)'
+          nohup '\(bundledPython)' -u -m flow run --verbose \
+            > /tmp/flow-daemon.log 2>&1 &
+        else
+          # Dev fallback: expect a cloned repo + .venv in $HOME.
+          cd \(home)/Witzper && \
+          if [[ -f .venv/bin/activate ]]; then source .venv/bin/activate; fi && \
+          if [[ -x ./Witzper ]]; then \
+            nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
+          else \
+            nohup python3 -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
+          fi
+        fi
+        """
     }
 
     func restartPythonDaemon() {
@@ -1059,20 +1091,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Give macOS a beat to reap the processes before we spawn a replacement.
         Thread.sleep(forTimeInterval: 0.3)
-        // Spawn new daemon — prefer the native ./Witzper launcher so
-        // Activity Monitor shows "Witzper" as the process name.
-        let script = """
-        cd \(home)/Witzper && \
-        source .venv/bin/activate && \
-        if [[ -x ./Witzper ]]; then \
-          nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
-        else \
-          nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
-        fi
-        """
+        // Spawn new daemon using the same bundled-first resolution order.
         let spawn = Process()
         spawn.launchPath = "/bin/zsh"
-        spawn.arguments = ["-c", script]
+        spawn.arguments = ["-c", buildDaemonLaunchScript()]
         try? spawn.run()
     }
 

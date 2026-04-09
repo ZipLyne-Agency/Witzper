@@ -60,12 +60,12 @@ enum ModelCatalog {
         ),
         ModelOption(
             id: "mlx-community/Qwen3-8B-4bit",
-            label: "Qwen3 8B",
+            label: "Qwen3 8B (default)",
             role: .cleanup,
             approxRamGB: 5.0,
             approxLatencyMs: 120,
             qualityStars: 4,
-            blurb: "Smarter than 4B. Headroom for tougher transcripts."
+            blurb: "Witzper's default. ~4.5 GB download, runs on any 16 GB Mac, clean transcripts with headroom for tougher ones."
         ),
         ModelOption(
             id: "mlx-community/Qwen3-14B-8bit",
@@ -78,12 +78,12 @@ enum ModelCatalog {
         ),
         ModelOption(
             id: "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit",
-            label: "Qwen3 30B-A3B (default)",
+            label: "Qwen3 30B-A3B",
             role: .cleanup,
             approxRamGB: 32.0,
             approxLatencyMs: 250,
             qualityStars: 5,
-            blurb: "30B MoE, 3B active. Witzper's default. Needs ≥32 GB RAM."
+            blurb: "30B MoE, 3B active. Top quality. Opt-in for power users with ≥32 GB RAM."
         ),
     ]
 
@@ -139,12 +139,12 @@ enum ModelCatalog {
             blurb: "Light Command Mode for 32 GB Macs. 'Rewrite this email' quality."
         ),
         ModelOption(
-            id: "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit",
-            label: "Qwen3 30B-A3B (shared — default)",
+            id: "mlx-community/Qwen3-8B-4bit",
+            label: "Qwen3 8B (shared — default)",
             role: .command,
-            approxRamGB: 32.0,
-            approxLatencyMs: 800,
-            qualityStars: 5,
+            approxRamGB: 5.0,
+            approxLatencyMs: 400,
+            qualityStars: 4,
             blurb: "Reuses the cleanup model. Zero extra RAM if it's already loaded."
         ),
     ]

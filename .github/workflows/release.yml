@@ -28,6 +28,11 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Install uv (Python runtime bundler)
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Build Witzper.app
         run: |
           ./scripts/build_app.sh
@@ -46,6 +51,32 @@ jobs:
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Package dmg
+        id: dmg
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_NAME="Witzper-${VERSION}.dmg"
+          STAGING="build/dmg-staging"
+          rm -rf "${STAGING}"
+          mkdir -p "${STAGING}"
+          # Drag-to-install layout: the .app next to an Applications symlink
+          # so users can drop Witzper.app straight into /Applications from the
+          # mounted disk image.
+          cp -R build/Witzper.app "${STAGING}/"
+          ln -s /Applications "${STAGING}/Applications"
+          # UDZO = compressed read-only; matches what create-dmg emits.
+          hdiutil create \
+            -volname "Witzper" \
+            -srcfolder "${STAGING}" \
+            -ov \
+            -format UDZO \
+            "${DMG_NAME}"
+          DMG_SHA256="$(shasum -a 256 "${DMG_NAME}" | awk '{print $1}')"
+          DMG_SIZE="$(stat -f%z "${DMG_NAME}")"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha256=$DMG_SHA256" >> "$GITHUB_OUTPUT"
+          echo "dmg_size=$DMG_SIZE" >> "$GITHUB_OUTPUT"
 
       - name: Write latest.json manifest
         run: |
@@ -74,10 +105,12 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           ZIP_NAME="${{ steps.package.outputs.zip_name }}"
+          DMG_NAME="${{ steps.dmg.outputs.dmg_name }}"
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "v${VERSION}" \
             --generate-notes \
             --latest \
             "${ZIP_NAME}" \
+            "${DMG_NAME}" \
             "latest.json"

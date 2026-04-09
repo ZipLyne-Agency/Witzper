@@ -61,7 +61,7 @@ context_prompt_max_tokens = 1024
 
 [cleanup]
 # Hot-path LLM cleanup
-model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+model = "mlx-community/Qwen3-8B-4bit"
 max_tokens = 96
 temperature = 0.0
 # Number of few-shot examples retrieved dynamically from correction store
@@ -74,7 +74,7 @@ max_edit_distance_ratio = 0.5
 # Command-mode model. Only loads on demand via separate hotkey.
 # Defaults to reusing the cleanup model so there's zero extra RAM cost.
 enabled = true
-model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+model = "mlx-community/Qwen3-8B-4bit"
 max_tokens = 2048
 # Hotkey moved to [hotkeys.command]. Left blank for back-compat.
 hotkey = ""

@@ -304,7 +304,13 @@ struct OnboardingView: View {
     }
 
     private var requiredModels: [ModelOption] {
-        [ModelCatalog.asr.first!, ModelCatalog.cleanup.last!]
+        // Default cleanup is Qwen3 8B (~5 GB RAM, ~4.5 GB download) — the
+        // smallest model that produces genuinely clean transcripts. The 30B
+        // stays in the catalog for power users with ≥32 GB RAM who opt in
+        // from the Settings tab.
+        let cleanup = ModelCatalog.cleanup.first { $0.id == "mlx-community/Qwen3-8B-4bit" }
+            ?? ModelCatalog.cleanup.first!
+        return [ModelCatalog.asr.first!, cleanup]
     }
 
     private func modelRow(_ m: ModelOption) -> some View {
