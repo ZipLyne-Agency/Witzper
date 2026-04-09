@@ -59,7 +59,7 @@ enum ModelCatalog {
             blurb: "Best small-model quality on Apple Silicon. Excellent default for 16 GB Macs."
         ),
         ModelOption(
-            id: "mlx-community/Qwen3-8B-Instruct-2507-4bit",
+            id: "mlx-community/Qwen3-8B-4bit",
             label: "Qwen3 8B",
             role: .cleanup,
             approxRamGB: 5.0,
@@ -68,7 +68,7 @@ enum ModelCatalog {
             blurb: "Smarter than 4B. Headroom for tougher transcripts."
         ),
         ModelOption(
-            id: "mlx-community/Qwen3-14B-Instruct-2507-8bit",
+            id: "mlx-community/Qwen3-14B-8bit",
             label: "Qwen3 14B",
             role: .cleanup,
             approxRamGB: 15.0,
@@ -130,7 +130,7 @@ enum ModelCatalog {
     // Command Mode (heavy, lazy-loaded, separate hotkey)
     static let command: [ModelOption] = [
         ModelOption(
-            id: "mlx-community/Qwen3-14B-Instruct-2507-4bit",
+            id: "mlx-community/Qwen3-14B-4bit",
             label: "Qwen3 14B (4-bit) — light",
             role: .command,
             approxRamGB: 8.0,

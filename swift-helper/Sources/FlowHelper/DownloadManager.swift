@@ -43,23 +43,36 @@ final class DownloadManager: ObservableObject {
 
         let p = Process()
         p.launchPath = "/bin/zsh"
-        // Try common install locations for the hf CLI. Fall back to PATH.
+        // GUI-launched apps don't inherit shell PATH, so we must add every
+        // plausible location for `hf` explicitly. The project venv at
+        // ~/Witzper/.venv/bin is the canonical source; homebrew / pyenv are
+        // fallbacks for dev installs. Last-resort: pip-install via whatever
+        // python is on PATH after the prepends.
         let script = """
-        export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH
-        if command -v hf >/dev/null 2>&1; then
+        export PATH=$HOME/Witzper/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH
+        if [[ -x $HOME/Witzper/.venv/bin/hf ]]; then
+            $HOME/Witzper/.venv/bin/hf download \(modelId)
+        elif command -v hf >/dev/null 2>&1; then
             hf download \(modelId)
+        elif [[ -x $HOME/Witzper/.venv/bin/python ]]; then
+            $HOME/Witzper/.venv/bin/python -m huggingface_hub.commands.huggingface_cli download \(modelId)
         else
-            python -m pip install -q 'huggingface_hub[cli]' >/dev/null 2>&1 && \
-            hf download \(modelId)
+            python3 -m pip install --quiet --user 'huggingface_hub[cli]' >/dev/null 2>&1 && \
+            python3 -m huggingface_hub.commands.huggingface_cli download \(modelId)
         fi
         """
         p.arguments = ["-lc", script]
 
-        // Discard child stdout/stderr — we're polling the FS for progress.
-        let devNull = FileHandle(forWritingAtPath: "/dev/null")
-        if let devNull = devNull {
-            p.standardOutput = devNull
-            p.standardError = devNull
+        // We poll the FS for progress, but keep child stdout/stderr in a log
+        // so "exit 127" style failures can be diagnosed after the fact.
+        if let log = FileHandle(forWritingAtPath: "/tmp/flow-download.log")
+            ?? {
+                FileManager.default.createFile(atPath: "/tmp/flow-download.log", contents: nil)
+                return FileHandle(forWritingAtPath: "/tmp/flow-download.log")
+            }() {
+            log.seekToEndOfFile()
+            p.standardOutput = log
+            p.standardError = log
         }
 
         p.terminationHandler = { [weak self] proc in
