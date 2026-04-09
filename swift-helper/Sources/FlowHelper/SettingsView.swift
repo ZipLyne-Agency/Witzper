@@ -307,9 +307,13 @@ struct SettingsView: View {
 
     private func restartDaemon() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // Kill by absolute repo path so the native launcher is matched
+        // regardless of argv[0] ("./Witzper", "Witzper", with/without flags).
+        // The /Applications menu-bar helper lives under a different prefix
+        // and is deliberately not matched.
         let script = """
         cd \(home)/Witzper && source .venv/bin/activate && \
-        pkill -9 -f 'flow run' ; pkill -9 -f './Witzper --verbose' ; sleep 1 ; \
+        pkill -9 -f 'flow run' ; pkill -9 -f '\(home)/Witzper/Witzper' ; sleep 1 ; \
         rm -f /tmp/Witzper.pid ; \
         if [[ -x ./Witzper ]]; then \
           PATH=/opt/homebrew/bin:$PATH nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \

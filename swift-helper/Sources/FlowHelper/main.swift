@@ -1026,18 +1026,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func restartPythonDaemon() {
-        // Kill existing python -m flow processes
-        let task = Process()
-        task.launchPath = "/usr/bin/pkill"
-        task.arguments = ["-f", "flow run"]
-        try? task.run()
-        task.waitUntilExit()
-        // Also kill our native launcher if running
-        let task2 = Process()
-        task2.launchPath = "/usr/bin/pkill"
-        task2.arguments = ["-f", "./Witzper --verbose"]
-        try? task2.run()
-        task2.waitUntilExit()
+        // Kill any previous daemon instance. We match by:
+        //   1. `flow run`            — plain `python -m flow run …`
+        //   2. $HOME/Witzper/Witzper — native launcher, regardless of argv
+        //                              (old bug: matching "./Witzper" or
+        //                              "--verbose" missed the launcher once
+        //                              argv[0] became a bare "Witzper").
+        // The /Applications/Witzper.app menu-bar helper is deliberately
+        // excluded by using the absolute repo path — pkill -f won't match
+        // it.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for pattern in ["flow run", "\(home)/Witzper/Witzper"] {
+            let k = Process()
+            k.launchPath = "/usr/bin/pkill"
+            k.arguments = ["-9", "-f", pattern]
+            try? k.run()
+            k.waitUntilExit()
+        }
+        // Give macOS a beat to reap the processes before we spawn a replacement.
+        Thread.sleep(forTimeInterval: 0.3)
         // Spawn new daemon — prefer the native ./Witzper launcher so
         // Activity Monitor shows "Witzper" as the process name.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
