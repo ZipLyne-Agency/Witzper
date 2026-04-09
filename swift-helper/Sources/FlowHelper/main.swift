@@ -622,6 +622,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startDaemonItem.target = self
         menu.addItem(startDaemonItem)
 
+        let checkUpdatesItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(menuCheckForUpdates),
+            keyEquivalent: ""
+        )
+        checkUpdatesItem.target = self
+        menu.addItem(checkUpdatesItem)
+
         let testItem = NSMenuItem(
             title: "▶ Test (sound + HUD, 2s)",
             action: #selector(runTest),
@@ -783,6 +791,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // /Applications should "just work" without a separate terminal.
         DispatchQueue.global().async { [weak self] in
             self?.ensureDaemonRunning()
+        }
+
+        // Silent update check: runs at most once per 24h, only prompts
+        // the user if a newer release is actually available.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            Task { @MainActor in Updater.checkSilently() }
         }
 
         // First-launch onboarding: shows permissions + mic picker flow.
@@ -1064,6 +1078,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func menuRestartDaemon() {
         restartPythonDaemon()
+    }
+
+    @objc func menuCheckForUpdates() {
+        Task { @MainActor in Updater.checkInteractively() }
     }
 
     @objc func openDashboard() {

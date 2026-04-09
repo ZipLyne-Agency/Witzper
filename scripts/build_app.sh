@@ -10,6 +10,20 @@ CONTENTS="${APP_DIR}/Contents"
 MACOS="${CONTENTS}/MacOS"
 RES="${CONTENTS}/Resources"
 
+# Version is read from the VERSION file at the repo root — the single source
+# of truth consumed by build_app.sh, scripts/release.sh, and the in-app
+# Updater (which compares it against GitHub Releases). Bump by running
+# scripts/release.sh X.Y.Z, not by hand-editing this file.
+VERSION="$(cat VERSION | tr -d '[:space:]')"
+if [[ -z "$VERSION" ]]; then
+    echo "ERROR: VERSION file is empty" >&2
+    exit 1
+fi
+# CFBundleVersion is a monotonic build number. We use the number of git
+# commits reachable from HEAD so it strictly increases even between tagged
+# releases. Falls back to "1" outside a git checkout.
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+
 echo "→ building Swift helper (release)"
 (cd swift-helper && swift build -c release)
 
@@ -20,7 +34,7 @@ mkdir -p "${MACOS}" "${RES}"
 cp swift-helper/.build/release/flow-helper "${MACOS}/Witzper"
 chmod +x "${MACOS}/Witzper"
 
-cat > "${CONTENTS}/Info.plist" <<'PLIST'
+cat > "${CONTENTS}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -31,8 +45,8 @@ cat > "${CONTENTS}/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>Witzper</string>
     <key>CFBundleDisplayName</key><string>Witzper</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Isaac Horowitz. MIT license.</string>
@@ -53,6 +67,6 @@ fi
 # Ad-hoc sign so it runs without Gatekeeper friction
 codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
 
-echo "✔ built ${APP_DIR}"
+echo "✔ built ${APP_DIR} (v${VERSION} build ${BUILD_NUMBER})"
 echo "  install: cp -r ${APP_DIR} /Applications/"
 echo "  run:     open ${APP_DIR}"

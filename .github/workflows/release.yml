@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Token needs write access to Contents for gh release create / file upload.
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed so build_app.sh can compute the git rev-count build number
+
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          VERSION="$(cat VERSION | tr -d '[:space:]')"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::VERSION file ($VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build Witzper.app
+        run: |
+          ./scripts/build_app.sh
+
+      - name: Package zip
+        id: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="Witzper-${VERSION}.zip"
+          cd build
+          # ditto preserves bundle metadata + symlinks, unlike `zip -r`.
+          ditto -c -k --sequesterRsrc --keepParent Witzper.app "../${ZIP_NAME}"
+          cd ..
+          SHA256="$(shasum -a 256 "${ZIP_NAME}" | awk '{print $1}')"
+          SIZE="$(stat -f%z "${ZIP_NAME}")"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Write latest.json manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="${{ steps.package.outputs.zip_name }}"
+          SHA256="${{ steps.package.outputs.sha256 }}"
+          SIZE="${{ steps.package.outputs.size }}"
+          # This manifest is what the in-app Updater fetches. Keep the key
+          # names stable — Updater.swift hard-codes them.
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "tag": "${GITHUB_REF_NAME}",
+            "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ZIP_NAME}",
+            "sha256": "${SHA256}",
+            "size": ${SIZE},
+            "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "notes_url": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+          }
+          EOF
+          cat latest.json
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="${{ steps.package.outputs.zip_name }}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            --latest \
+            "${ZIP_NAME}" \
+            "latest.json"

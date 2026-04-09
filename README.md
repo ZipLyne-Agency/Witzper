@@ -509,6 +509,33 @@ Witzper/
 
 ---
 
+## 🔄 Updating Witzper
+
+Witzper has a built-in updater. **You never need to visit GitHub to stay current.**
+
+- **Automatic**: every 24 hours when Witzper.app launches, it silently checks [github.com/ZipLyne-Agency/Witzper/releases/latest](https://github.com/ZipLyne-Agency/Witzper/releases/latest). If a newer version is available, a prompt appears asking to install it. One click, ~10 seconds, the app relaunches on the new version.
+- **Manual**: menu bar → **Check for Updates…** — forces a check right now, even if you just ran one. If you're already on the latest, it tells you so.
+- **Under the hood**: the updater fetches a `latest.json` manifest produced by GitHub Actions on each tagged release, downloads the `.zip` asset, verifies the SHA-256, replaces `/Applications/Witzper.app` (the old bundle is moved to the Trash, not deleted), and relaunches. Source: [`swift-helper/Sources/FlowHelper/Updater.swift`](swift-helper/Sources/FlowHelper/Updater.swift).
+- **Opt out**: the silent check respects your privacy and never sends analytics. If you want to disable it entirely, remove the `Updater.checkSilently()` call from `main.swift` and rebuild.
+
+### For developers: cutting a release
+
+Releases are tag-triggered. To ship a new version:
+
+```bash
+scripts/release.sh 0.2.0
+```
+
+That script validates the current state, bumps [`VERSION`](VERSION), commits, creates an annotated `v0.2.0` tag, and pushes everything. The push triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which on a `macos-14` runner builds `Witzper.app` in release mode, zips it with `ditto`, computes a SHA-256, and creates a GitHub Release containing:
+
+- `Witzper-0.2.0.zip` — the downloadable app bundle.
+- `latest.json` — the manifest the in-app Updater reads.
+- Auto-generated release notes from the commits since the last tag.
+
+Users who already have Witzper installed see the update within 24 hours (or instantly via Check for Updates). There's no App Store, no notarization, no Sparkle appcast to maintain. Just tag and push.
+
+---
+
 ## 🤝 Contributing
 
 Witzper is MIT-licensed and contributions are welcome. Good starter tasks are tagged in [`IDEAS.md`](IDEAS.md) — especially the ones flagged "High-impact, low effort". Open a PR or issue on GitHub.
