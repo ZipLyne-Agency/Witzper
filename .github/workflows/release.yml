@@ -114,3 +114,54 @@ jobs:
             "${ZIP_NAME}" \
             "${DMG_NAME}" \
             "latest.json"
+
+      # ----------------------------------------------------------------------
+      # Auto-update the Homebrew tap so `brew upgrade --cask witzper` picks
+      # up the new version without a human editing the formula. Gracefully
+      # skipped if HOMEBREW_TAP_TOKEN is not set — that way forks and first
+      # deploys don't fail just because the tap secret is missing.
+      #
+      # HOMEBREW_TAP_TOKEN requirements: a GitHub Personal Access Token
+      # (fine-grained or classic) with `Contents: write` on the tap repo
+      # ZipLyne-Agency/homebrew-witzper. Stored under repo Settings →
+      # Secrets and variables → Actions → New repository secret.
+      # ----------------------------------------------------------------------
+      - name: Update Homebrew Cask
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAP_TOKEN}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN secret not set — skipping cask update."
+            echo "To enable: GitHub → Settings → Secrets and variables → Actions → add HOMEBREW_TAP_TOKEN."
+            exit 0
+          fi
+          echo "→ cloning homebrew-witzper tap"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/ZipLyne-Agency/homebrew-witzper.git" tap
+          cd tap
+
+          echo "→ rewriting Casks/witzper.rb"
+          python3 - <<'PY'
+          import os, re, pathlib
+          path = pathlib.Path("Casks/witzper.rb")
+          text = path.read_text()
+          version = os.environ["VERSION"]
+          sha = os.environ["SHA256"]
+          text = re.sub(r'version\s+"[^"]+"', f'version "{version}"', text, count=1)
+          text = re.sub(r'sha256\s+"[0-9a-fA-F]+"', f'sha256 "{sha}"', text, count=1)
+          path.write_text(text)
+          print(path.read_text())
+          PY
+
+          echo "→ committing + pushing"
+          git config user.name "witzper-release-bot"
+          git config user.email "witzper-release-bot@users.noreply.github.com"
+          git add Casks/witzper.rb
+          if git diff --cached --quiet; then
+            echo "no cask changes — skipping push"
+            exit 0
+          fi
+          git commit -m "witzper: bump to v${VERSION}"
+          git push origin HEAD:main

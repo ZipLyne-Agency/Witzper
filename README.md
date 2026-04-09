@@ -54,9 +54,47 @@ The cost: you need a recent Apple Silicon Mac with real RAM. The default setup w
 
 ---
 
-## 🚀 Quick start (non-technical)
+## 📦 Install
 
-> **⚠️ Status:** Witzper is currently a **developer scaffold** — there's no signed `.dmg` installer yet. The steps below work on any Apple Silicon Mac but involve the Terminal. If you can copy-paste four lines, you can run Witzper. A one-click installer is on the roadmap.
+Three ways to get Witzper running. Pick one.
+
+### 1. Homebrew Cask (recommended)
+
+One line. This is how most people should install Witzper.
+
+```bash
+brew install --cask ZipLyne-Agency/witzper/witzper
+```
+
+Homebrew strips the `com.apple.quarantine` xattr automatically, so macOS Gatekeeper won't block first launch even though Witzper isn't notarized. After install, grant **Accessibility** + **Input Monitoring** under *System Settings → Privacy & Security*, then open Witzper from `/Applications`.
+
+Upgrade later with:
+```bash
+brew upgrade --cask witzper
+```
+(Or use the in-app **Check for Updates…** menu item — see [🔄 Updating Witzper](#-updating-witzper).)
+
+### 2. Download the DMG or ZIP from GitHub Releases
+
+Grab the latest [`Witzper-X.Y.Z.dmg`](https://github.com/ZipLyne-Agency/Witzper/releases/latest) (drag-to-install disk image) or `Witzper-X.Y.Z.zip`. After unzipping or mounting, drag **Witzper.app** into `/Applications`.
+
+**⚠️ One extra step**: because Witzper is ad-hoc signed (no Apple Developer account), macOS Gatekeeper will refuse to open it on first launch. Strip the quarantine attribute with a single command:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Witzper.app
+```
+
+Then double-click Witzper.app. This is not needed if you install via Homebrew (option 1 above) — brew does it for you.
+
+### 3. Build from source
+
+Useful if you want to hack on Witzper or verify the build yourself. Requires Homebrew, Python 3.13, Xcode command-line tools, and `uv`. Full instructions in [Quick start (build from source)](#-quick-start-build-from-source) below.
+
+---
+
+## 🚀 Quick start (build from source)
+
+> **For contributors and developers.** If you just want to use Witzper, see [📦 Install](#-install) above — `brew install --cask witzper` is the one-liner. The steps below are for building from source.
 
 ### Step 1 — Install the prerequisites (one time, ~5 minutes)
 
@@ -76,7 +114,7 @@ xcode-select --install
 ### Step 2 — Download and build Witzper (~10 minutes)
 
 ```bash
-git clone https://github.com/isaachorowitz/Witzper.git ~/Witzper
+git clone https://github.com/ZipLyne-Agency/Witzper.git ~/Witzper
 cd ~/Witzper
 ./scripts/setup.sh
 ```
