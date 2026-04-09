@@ -13,7 +13,6 @@ from flow.context.app_context import AppContextProvider
 from flow.context.dictionary import Dictionary
 from flow.context.few_shot import FewShotRetriever
 from flow.context.styles import StyleResolver
-from flow.personalize.snippets import SnippetStore
 from flow.core.audio import AudioCapture
 from flow.core.command_mode import CommandModeController
 from flow.core.hotkey import HotkeyRouter
@@ -25,6 +24,10 @@ from flow.models.command import CommandLLM
 from flow.models.parakeet import ParakeetASR
 from flow.models.qwen3_asr import Qwen3ASR
 from flow.models.whisper_mlx import WhisperASR
+from flow.personalize.edit_watch import EditWatcher
+from flow.personalize.snippets import SnippetStore
+from flow.personalize.store import CorrectionStore
+from flow.ui import stream
 
 
 def _make_asr(model_id: str) -> ASRBackend:
@@ -35,9 +38,6 @@ def _make_asr(model_id: str) -> ASRBackend:
     if "qwen3-asr" in lower:
         return Qwen3ASR(model_id)
     return ParakeetASR(model_id)
-from flow.personalize.edit_watch import EditWatcher
-from flow.personalize.store import CorrectionStore
-from flow.ui import stream
 
 console = Console()
 

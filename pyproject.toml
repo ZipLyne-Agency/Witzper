@@ -57,7 +57,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501"]
+# B008 fires on `typer.Option(...)` in default args — the idiomatic Typer
+# pattern for CLI definitions. Ignore globally rather than noqa every call site.
+ignore = ["E501", "B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

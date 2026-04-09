@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from flow.config import CommandCfg
 
-
 COMMAND_SYSTEM_PROMPT = """You are a text transformation engine. You receive a dictated \
 instruction along with a block of source text (selected by the user or the last \
 dictated paragraph). Produce the transformed output ONLY — no preamble, no quotes, \

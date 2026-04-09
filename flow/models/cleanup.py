@@ -106,9 +106,9 @@ class CleanupLLM:
         """Pre-fill a KV cache with the static prefix so per-call prefill only
         processes the new (small) suffix."""
         try:
-            from mlx_lm.models.cache import make_prompt_cache
-            from mlx_lm import stream_generate
             import mlx.core as mx
+            from mlx_lm import stream_generate
+            from mlx_lm.models.cache import make_prompt_cache
         except ImportError:
             return
 
@@ -211,8 +211,8 @@ class CleanupLLM:
         return messages
 
     def _generate(self, messages: list[dict]) -> str:
-        from mlx_lm import stream_generate
         import mlx.core as mx
+        from mlx_lm import stream_generate
 
         prompt_str = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True

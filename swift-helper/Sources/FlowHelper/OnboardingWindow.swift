@@ -56,7 +56,7 @@ final class OnboardingState: ObservableObject {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self = self else { return }
+                guard let self else { return }
                 self.axGranted = OnboardingPermission.accessibilityGranted
                 self.imGranted = OnboardingPermission.inputMonitoringGranted
                 self.micGranted = OnboardingPermission.microphoneGranted

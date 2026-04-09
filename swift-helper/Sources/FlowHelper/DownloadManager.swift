@@ -88,7 +88,7 @@ final class DownloadManager: ObservableObject {
 
         p.terminationHandler = { [weak self] proc in
             Task { @MainActor in
-                guard let self = self else { return }
+                guard let self else { return }
                 self.timers[modelId]?.invalidate()
                 self.timers.removeValue(forKey: modelId)
                 self.processes.removeValue(forKey: modelId)
@@ -118,7 +118,7 @@ final class DownloadManager: ObservableObject {
         // Poll cache dir size every 500 ms.
         let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self = self else { return }
+                guard let self else { return }
                 guard var s = self.state[modelId], s.isRunning else { return }
                 s.bytesDownloaded = self.currentCacheSize(for: modelId)
                 // If the folder already exceeds our estimate, grow the estimate

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import tomli
 from dataclasses import dataclass
 from pathlib import Path
+
+import tomli
 
 APP_CATEGORIES_PATH = (
     Path(__file__).resolve().parent.parent.parent / "configs" / "app_categories.toml"

@@ -135,9 +135,10 @@ def style(
     name: str = typer.Argument(None, help="formal | casual | very_casual | excited"),
 ) -> None:
     """View or set Flow Styles per app category."""
-    from flow.context.styles import CATEGORIES, STYLE_INSTRUCTIONS, StyleResolver  # noqa: F401
-    from flow.config import USER_CONFIG_PATH
     import tomli
+
+    from flow.config import USER_CONFIG_PATH
+    from flow.context.styles import CATEGORIES, STYLE_INSTRUCTIONS, StyleResolver  # noqa: F401
 
     cfg = load_config()
 
@@ -185,7 +186,7 @@ def train(
     what: str = typer.Argument("cleanup", help="cleanup | asr"),
 ) -> None:
     """Run a LoRA fine-tune cycle against local corrections."""
-    from flow.personalize.train_lora import train_cleanup, train_asr
+    from flow.personalize.train_lora import train_asr, train_cleanup
 
     if what == "cleanup":
         train_cleanup()

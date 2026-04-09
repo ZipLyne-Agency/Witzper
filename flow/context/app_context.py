@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tomli
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+import tomli
 
 HELPER_SOCKET = Path(os.environ.get("FLOW_CONTEXT_SOCKET", "/tmp/flow-context.sock"))
 APP_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "app_rules.toml"
@@ -35,7 +35,7 @@ class AppContext:
     window_title: str | None
     surrounding_text: str | None
     selected_text: str | None
-    rule: Optional[AppRule]
+    rule: AppRule | None
 
 
 class AppContextProvider:

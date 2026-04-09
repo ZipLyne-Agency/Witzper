@@ -19,12 +19,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, Tuple
 
 SOCKET_PATH = Path(os.environ.get("FLOW_SOCKET", "/tmp/Witzper.sock"))
 
-Handler = Tuple[Callable[[], None], Callable[[], None]]
+Handler = tuple[Callable[[], None], Callable[[], None]]
 
 
 class HotkeyRouter:
@@ -36,7 +36,7 @@ class HotkeyRouter:
     """
 
     def __init__(self) -> None:
-        self._handlers: Dict[str, Handler] = {}
+        self._handlers: dict[str, Handler] = {}
         self._fallback_action: str = "dictate"
 
     def register(
