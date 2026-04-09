@@ -99,7 +99,7 @@ For each prompt, macOS will open *System Settings → Privacy & Security*. Flip 
 ./scripts/run.sh
 ```
 
-The first time you run this, it'll ask you to pick a push-to-talk hotkey (default **Fn**). Then you'll see a 🔴 icon in your menu bar. **Hold Fn**, say *"hey are you free for lunch tomorrow"*, release. It should type back `Hey are you free for lunch tomorrow?` into whatever field you have focused.
+The first time you run this, it'll ask you to pick a push-to-talk hotkey (default **Fn**). Then you'll see the Witzper waveform icon in your menu bar. **Hold Fn**, say *"hey are you free for lunch tomorrow"*, release. It should type back `Hey are you free for lunch tomorrow?` into whatever field you have focused.
 
 That's it. Stop the daemon with **⌃C** in the terminal.
 
@@ -225,7 +225,7 @@ Open via the menu-bar icon or `flow doctor`. Tabs:
 
 ### UI niceties
 - 🔴 **Floating HUD pill** — pulsing red dot + status + live partial transcript, always on top, works across Spaces.
-- 🔕 **Menu-bar icon** — flips 🔴 / ⚪ to show recording state.
+- 🔕 **Menu-bar icon** — waveform glyph that highlights while recording.
 - 🔊 **Audio feedback** — start/stop tones (configurable).
 - ✅ **Built-in diagnostics** — `flow doctor` and the menu's "Show diagnostics…" dialog check permissions, models, and sockets.
 

@@ -14,6 +14,12 @@ from flow.core.hotkey import SOCKET_PATH
 console = Console()
 
 
+def _hf_has(hf_home: Path, repo_id: str) -> bool:
+    if not hf_home.exists():
+        return False
+    return (hf_home / f"models--{repo_id.replace('/', '--')}").exists()
+
+
 def _check(label: str, ok: bool, detail: str = "") -> tuple[str, str, str]:
     mark = "[green]✓[/]" if ok else "[red]✗[/]"
     return (mark, label, detail)
@@ -52,17 +58,13 @@ def run_doctor() -> None:
     rows.append(
         _check(
             f"HF cache: {cfg.asr.speed.model}",
-            any(hf_home.glob(f"**/{cfg.asr.speed.model.replace('/', '--')}*"))
-            if hf_home.exists()
-            else False,
+            _hf_has(hf_home, cfg.asr.speed.model),
         )
     )
     rows.append(
         _check(
             f"HF cache: {cfg.cleanup.model}",
-            any(hf_home.glob(f"**/{cfg.cleanup.model.replace('/', '--')}*"))
-            if hf_home.exists()
-            else False,
+            _hf_has(hf_home, cfg.cleanup.model),
         )
     )
 
