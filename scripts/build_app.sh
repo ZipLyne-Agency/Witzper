@@ -91,37 +91,69 @@ if [[ "${WITZPER_SKIP_PYTHON_BUNDLE:-0}" != "1" ]]; then
     echo "→ bundling Python runtime into ${PY_ROOT}"
     rm -rf "${PY_ROOT}"
 
-    # Create a relocatable venv backed by uv's managed python-build-standalone
-    # interpreter. --relocatable rewrites the venv's scripts to resolve
-    # sys.prefix at runtime instead of hardcoding the build-time path, so the
-    # venv keeps working after the .app is dragged into /Applications.
-    uv venv \
-        --python 3.13 \
-        --python-preference only-managed \
-        --relocatable \
-        "${PY_ROOT}"
+    # Strategy: skip `uv venv` entirely. It creates a venv whose bin/python
+    # is a symlink to uv's managed CPython install at a build-machine-
+    # specific absolute path (e.g. /Users/runner/.local/share/uv/...).
+    # --relocatable only relocates the venv's own shims; the symlink out
+    # of the venv stays absolute, so the bundled python is dead on any
+    # machine that isn't the build machine.
+    #
+    # Instead, copy uv's managed python-build-standalone tree *as-is* into
+    # the bundle. python-build-standalone is explicitly designed for
+    # embedding — sys.prefix is computed from the binary's own location,
+    # all dylib paths are @executable_path-relative. We then use its own
+    # pip to install flow + deps into its site-packages, so there's no
+    # venv indirection at all.
 
-    # Install flow + all runtime deps into the bundled venv. We install the
-    # package (`.`) rather than just its deps so `python -m flow` resolves,
-    # but at launch we prepend Contents/Resources to PYTHONPATH so the live
-    # source under Resources/flow/ shadows the installed copy — this means
-    # the configs/ sibling that flow.config expects via __file__/../configs
-    # resolves correctly.
-    uv pip install \
-        --python "${PY_ROOT}/bin/python" \
-        --no-cache \
-        .
+    # 1. Make sure uv has managed CPython 3.13 available.
+    uv python install 3.13 --python-preference only-managed >/dev/null
+    UV_PY="$(uv python find 3.13 --managed-python)"
+    if [[ -z "$UV_PY" || ! -x "$UV_PY" ]]; then
+        echo "ERROR: could not locate uv-managed CPython 3.13" >&2
+        exit 1
+    fi
+    # UV_PY = .../cpython-3.13-macos-aarch64-none/bin/python3.13
+    # Install root is two levels up.
+    UV_PY_ROOT="$(dirname "$(dirname "$UV_PY")")"
+
+    # 2. Copy the whole install tree into the bundle, dereferencing any
+    #    outer symlinks so the result is fully self-contained.
+    echo "  copying ${UV_PY_ROOT} → ${PY_ROOT}"
+    mkdir -p "$(dirname "${PY_ROOT}")"
+    cp -RL "${UV_PY_ROOT}" "${PY_ROOT}"
+
+    # 3. Install flow + runtime deps into the bundled python's site-
+    #    packages directly. No venv. We use pip via `python -m pip` against
+    #    the bundled interpreter itself — it's already ensurepip-enabled.
+    echo "→ installing flow + dependencies into bundled python"
+    "${PY_ROOT}/bin/python3.13" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    "${PY_ROOT}/bin/python3.13" -m pip install --upgrade --quiet pip
+    "${PY_ROOT}/bin/python3.13" -m pip install --no-cache-dir --quiet .
+
+    # 4. Provide friendly python / python3 symlinks inside bin/ so the
+    #    helper's spawn script can call "python" without version suffixing.
+    #    These are relative symlinks, so the bundle stays relocatable.
+    (cd "${PY_ROOT}/bin" && ln -sf python3.13 python3 && ln -sf python3.13 python)
 
     echo "→ copying flow source and configs into Resources"
     rm -rf "${RES}/flow" "${RES}/configs"
     cp -R flow "${RES}/flow"
     cp -R configs "${RES}/configs"
 
-    # Strip obvious dead weight from the bundled venv to keep the zip/dmg
-    # download reasonable. MLX + torch still dominate, but every MB helps.
+    # Strip obvious dead weight from the bundled runtime to keep the zip
+    # download reasonable. MLX still dominates at ~150 MB but every MB helps.
     find "${PY_ROOT}" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
     find "${PY_ROOT}" -type d -name "tests" -prune -exec rm -rf {} + 2>/dev/null || true
     find "${PY_ROOT}" -type f -name "*.pyc" -delete 2>/dev/null || true
+
+    # Sanity check: the bundled python must not contain any absolute
+    # references to the build machine's paths, otherwise the whole
+    # relocation story falls apart.
+    BUILD_HOME_LEAK="$(grep -r -l "/Users/runner\\|/opt/homebrew/Cellar" "${PY_ROOT}/bin" 2>/dev/null || true)"
+    if [[ -n "$BUILD_HOME_LEAK" ]]; then
+        echo "  WARNING: bundled python bin/ leaks build-machine paths:" >&2
+        echo "  $BUILD_HOME_LEAK" >&2
+    fi
 
     PY_SIZE="$(du -sh "${PY_ROOT}" 2>/dev/null | awk '{print $1}')"
     echo "  bundled python: ${PY_SIZE}"
