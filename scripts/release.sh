@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # One-command release: bump VERSION, commit, tag, push.
 #
-#   scripts/release.sh 0.2.0
+#   scripts/release.sh              # auto-bump patch (0.1.0 → 0.1.1)
+#   scripts/release.sh patch        # same
+#   scripts/release.sh minor        # 0.1.0 → 0.2.0
+#   scripts/release.sh major        # 0.1.0 → 1.0.0
+#   scripts/release.sh 0.2.0        # explicit version
 #
 # The push of the tag triggers .github/workflows/release.yml, which builds
 # Witzper.app on macos-14, zips it, and creates a GitHub Release with the
-# zip + latest.json manifest attached. The in-app Updater reads latest.json.
+# zip + dmg + latest.json manifest attached. The in-app Updater reads
+# latest.json to notify installed clients of new builds.
 #
 # Safety checks:
 #   - Must be on main.
@@ -15,17 +20,40 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ $# -ne 1 ]]; then
-    echo "usage: scripts/release.sh <version>   e.g. scripts/release.sh 0.2.0" >&2
+BUMP_ARG="${1:-patch}"
+
+# Parse current version from the VERSION file.
+CURRENT="$(cat VERSION | tr -d '[:space:]')"
+if ! [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    echo "ERROR: VERSION file must contain X.Y.Z (got: $CURRENT)" >&2
     exit 2
 fi
+CUR_MAJOR="${BASH_REMATCH[1]}"
+CUR_MINOR="${BASH_REMATCH[2]}"
+CUR_PATCH="${BASH_REMATCH[3]}"
 
-VERSION="$1"
+# Resolve the requested version.
+case "$BUMP_ARG" in
+    patch)
+        VERSION="${CUR_MAJOR}.${CUR_MINOR}.$((CUR_PATCH + 1))"
+        ;;
+    minor)
+        VERSION="${CUR_MAJOR}.$((CUR_MINOR + 1)).0"
+        ;;
+    major)
+        VERSION="$((CUR_MAJOR + 1)).0.0"
+        ;;
+    *)
+        VERSION="$BUMP_ARG"
+        ;;
+esac
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: version must be X.Y.Z (got: $VERSION)" >&2
+    echo "ERROR: version must be X.Y.Z or one of patch|minor|major (got: $BUMP_ARG)" >&2
     exit 2
 fi
+
+echo "→ current: v${CURRENT}   new: v${VERSION}"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$BRANCH" != "main" ]]; then

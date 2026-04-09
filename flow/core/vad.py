@@ -1,7 +1,10 @@
 """Voice activity detection + endpoint trimming.
 
-Supports pyannote segmentation 3.1 (SOTA) and Silero (lighter fallback).
-Both trim leading/trailing silence from a full utterance and return a clean waveform.
+Default backend is Silero via the `silero-vad` pip package running under
+onnxruntime — no torch dependency. Pyannote remains available as an optional
+backend for users who install the `[pyannote]` extras (pulls in torch).
+Both trim leading/trailing silence from a full utterance and return a clean
+waveform.
 """
 
 from __future__ import annotations
@@ -26,22 +29,29 @@ class VADBackend(Protocol):
 
 
 class SileroVAD:
-    """Silero VAD via the torch hub checkpoint. CPU-friendly."""
+    """Silero VAD running on onnxruntime.
+
+    Uses the `silero-vad` pip package with `onnx=True` so we don't pull in
+    torch (~900 MB). Quality is identical — same checkpoint, different
+    runtime. onnxruntime adds ~15 MB vs torch's ~900 MB.
+    """
 
     def __init__(self):
-        import torch
-
-        self._torch = torch
-        model, utils = torch.hub.load(
-            "snakers4/silero-vad", "silero_vad", trust_repo=True, verbose=False
-        )
-        self._model = model
-        self._get_speech_timestamps = utils[0]
+        try:
+            from silero_vad import get_speech_timestamps, load_silero_vad
+        except ImportError as e:
+            raise RuntimeError(
+                "silero-vad not installed — pip install silero-vad onnxruntime"
+            ) from e
+        # onnx=True routes through onnxruntime instead of torch.
+        self._model = load_silero_vad(onnx=True)
+        self._get_speech_timestamps = get_speech_timestamps
 
     def trim(self, audio: np.ndarray, sr: int) -> np.ndarray:
         if audio.size == 0:
             return audio
-        wav = self._torch.from_numpy(audio)
+        # The ONNX path accepts a numpy float32 array directly.
+        wav = np.ascontiguousarray(audio, dtype=np.float32)
         ts = self._get_speech_timestamps(wav, self._model, sampling_rate=sr)
         if not ts:
             return audio  # fall through; let ASR handle silence
@@ -51,7 +61,7 @@ class SileroVAD:
 
 
 class PyannoteVAD:
-    """pyannote segmentation 3.1 — more robust, handles sub-vocal speech better."""
+    """pyannote segmentation 3.1 — optional, requires the [pyannote] extras."""
 
     def __init__(self, model_id: str = "pyannote/segmentation-3.1"):
         try:
@@ -59,7 +69,8 @@ class PyannoteVAD:
             from pyannote.audio.pipelines import VoiceActivityDetection
         except ImportError as e:
             raise RuntimeError(
-                "pyannote.audio not installed — pip install pyannote.audio"
+                "pyannote.audio not installed — install with: "
+                "uv pip install 'witzper[pyannote]' (pulls in torch)"
             ) from e
         model = Model.from_pretrained(model_id)
         self._pipeline = VoiceActivityDetection(segmentation=model)
@@ -68,7 +79,7 @@ class PyannoteVAD:
     def trim(self, audio: np.ndarray, sr: int) -> np.ndarray:
         if audio.size == 0:
             return audio
-        import torch
+        import torch  # local import — only reachable if extras are installed
 
         waveform = torch.from_numpy(audio).unsqueeze(0)
         vad = self._pipeline({"waveform": waveform, "sample_rate": sr})
