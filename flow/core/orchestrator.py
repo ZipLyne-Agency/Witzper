@@ -145,16 +145,37 @@ class Orchestrator:
     def on_up(self) -> None:
         if self.verbose:
             console.print("[cyan]⏹ processing[/]")
+        # Signal the streaming loop to stop, then drain the trailing audio
+        # window. audio.stop() sleeps cfg.trailing_ms before snapshotting,
+        # which gives the partial thread time to wind down in parallel.
         self._stream_stop.set()
-        if self._stream_thread is not None:
-            # Ensure the partial loop has fully exited before we touch the
-            # ASR backend from _process (most backends aren't thread-safe).
-            self._stream_thread.join(timeout=2.0)
-            self._stream_thread = None
         audio = self.audio.stop()
         stream.emit({"type": "recording", "state": "stop"})
+        if self._stream_thread is not None:
+            # Must join before touching asr_speed again — most backends
+            # aren't thread-safe. Short timeout: the stop flag + trailing_ms
+            # sleep already gave the loop a chance to exit cleanly.
+            self._stream_thread.join(timeout=1.0)
+            self._stream_thread = None
         if audio.size == 0:
             return
+        # Run one last partial ASR pass on the fully-drained buffer. This
+        # (a) guarantees the cached partial covers the trailing word and
+        # (b) lets _process reuse it instead of re-transcribing from scratch,
+        # so the "final" ASR pass on key-release is eliminated.
+        if getattr(self.cfg.asr, "streaming", False):
+            try:
+                result = self.asr_speed.transcribe(
+                    audio, sample_rate=self.cfg.audio.sample_rate
+                )
+                text = (result.text or "").strip()
+                with self._stream_lock:
+                    self._last_partial_text = text
+                    self._last_partial_samples = int(audio.size)
+                stream.emit({"type": "partial", "text": text})
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    console.print(f"[yellow]final partial asr failed: {e}[/]")
         self._utterance_task = asyncio.create_task(self._process(audio))
 
     # ---- Streaming partial ASR loop --------------------------------------
@@ -216,10 +237,14 @@ class Orchestrator:
                 with self._stream_lock:
                     partial_text = self._last_partial_text
                     partial_samples = self._last_partial_samples
+                # Compare partial coverage against the raw (pre-VAD) audio
+                # size — that's what the partial was transcribed from. Using
+                # trimmed.size here was apples-to-oranges and could silently
+                # drop tail words when VAD shrank the final buffer.
                 if (
                     partial_text
                     and partial_samples
-                    >= int(trimmed.size * self.cfg.asr.streaming_reuse_ratio)
+                    >= int(audio.size * self.cfg.asr.streaming_reuse_ratio)
                 ):
                     raw = ASRResult(text=partial_text, alternatives=[], language=None)
                     if self.verbose:

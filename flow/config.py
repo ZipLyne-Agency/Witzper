@@ -69,8 +69,8 @@ class AsrCfg(BaseModel):
     # raw transcript if it covered ≥`streaming_reuse_ratio` of the final
     # audio, skipping the serial final ASR pass.
     streaming: bool = True
-    streaming_interval_ms: int = 350
-    streaming_min_audio_ms: int = 350
+    streaming_interval_ms: int = 200
+    streaming_min_audio_ms: int = 250
     streaming_reuse_ratio: float = 0.95
 
 
