@@ -1047,7 +1047,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Thread.sleep(forTimeInterval: 0.3)
         // Spawn new daemon — prefer the native ./Witzper launcher so
         // Activity Monitor shows "Witzper" as the process name.
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let script = """
         cd \(home)/Witzper && \
         source .venv/bin/activate && \
