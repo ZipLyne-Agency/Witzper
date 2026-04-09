@@ -7,7 +7,9 @@ def test_default_config_loads() -> None:
     # ~/.config/Witzper/config.toml override.
     cfg = load_config(DEFAULT_CONFIG_PATH)
     assert cfg.asr.speed.model.startswith("mlx-community/parakeet")
-    assert "Qwen3-30B-A3B" in cfg.cleanup.model
+    # Default cleanup is Qwen3 8B (~4.5 GB) — the 30B is now opt-in for
+    # power users via the Settings tab. See ModelCatalog.swift.
+    assert "Qwen3-8B" in cfg.cleanup.model
     assert cfg.personalization.auto_add_to_dictionary is True
     # Hotkey registry back-compat: both default actions present.
     assert "dictate" in cfg.hotkeys
