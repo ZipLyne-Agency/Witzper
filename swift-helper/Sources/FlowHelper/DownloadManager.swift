@@ -41,25 +41,36 @@ final class DownloadManager: ObservableObject {
             error: nil
         )
 
+        // Locate the repo root. GUI-launched apps don't inherit shell PATH,
+        // so we can't rely on `hf` being discoverable — we have to search a
+        // list of likely venv locations explicitly. Priority:
+        //   1. $FLOW_REPO_ROOT            — explicit override for advanced users
+        //   2. ~/Witzper                  — canonical dev install
+        //   3. ~/Desktop/flow-local       — historical path kept for existing users
+        //   4. homebrew / system PATH     — for a global `hf` install
+        //   5. python3 -m huggingface_hub — last resort, pip-installs on the fly
         let p = Process()
         p.launchPath = "/bin/zsh"
-        // GUI-launched apps don't inherit shell PATH, so we must add every
-        // plausible location for `hf` explicitly. The project venv at
-        // ~/Witzper/.venv/bin is the canonical source; homebrew / pyenv are
-        // fallbacks for dev installs. Last-resort: pip-install via whatever
-        // python is on PATH after the prepends.
         let script = """
-        export PATH=$HOME/Witzper/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH
-        if [[ -x $HOME/Witzper/.venv/bin/hf ]]; then
-            $HOME/Witzper/.venv/bin/hf download \(modelId)
-        elif command -v hf >/dev/null 2>&1; then
-            hf download \(modelId)
-        elif [[ -x $HOME/Witzper/.venv/bin/python ]]; then
-            $HOME/Witzper/.venv/bin/python -m huggingface_hub.commands.huggingface_cli download \(modelId)
-        else
-            python3 -m pip install --quiet --user 'huggingface_hub[cli]' >/dev/null 2>&1 && \
-            python3 -m huggingface_hub.commands.huggingface_cli download \(modelId)
+        set -e
+        candidates=()
+        [[ -n "$FLOW_REPO_ROOT" ]] && candidates+=("$FLOW_REPO_ROOT")
+        candidates+=("$HOME/Witzper" "$HOME/Desktop/flow-local")
+        for root in "${candidates[@]}"; do
+            if [[ -x "$root/.venv/bin/hf" ]]; then
+                exec "$root/.venv/bin/hf" download \(modelId)
+            fi
+        done
+        export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH
+        if command -v hf >/dev/null 2>&1; then
+            exec hf download \(modelId)
         fi
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -m pip install --quiet --user 'huggingface_hub[cli]' >/dev/null 2>&1 || true
+            exec python3 -m huggingface_hub.commands.huggingface_cli download \(modelId)
+        fi
+        echo "hf CLI not found and python3 unavailable. Install with: pip install 'huggingface_hub[cli]'" >&2
+        exit 127
         """
         p.arguments = ["-lc", script]
 

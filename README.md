@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  <sub>Built by <a href="https://ziplyne.agency">Ziplyne</a></sub>
+</p>
+
+<p align="center">
   <a href="#-quick-start-non-technical">Quick start</a> ·
   <a href="#-what-makes-witzper-different-from-wispr-flow">vs. Wispr Flow</a> ·
   <a href="#-models">Models</a> ·
@@ -25,6 +29,10 @@
 Witzper is a macOS app that turns your voice into polished, ready-to-send text. You hold a key (default: **Fn**), speak normally, release the key — and your words appear in whatever you're writing: iMessage, Slack, Gmail, Notion, VS Code, anywhere. Punctuation, capitalization, and tone are handled automatically by a local language model that knows *which app you're writing in* and *how you personally write*.
 
 It's built to match or beat [Wispr Flow](https://wisprflow.ai) on latency and transcript quality — without sending a single byte of your audio to the cloud.
+
+<p align="center">
+  <img src="docs/assets/dashboard.png" alt="Witzper dashboard" width="720" />
+</p>
 
 ---
 
@@ -516,4 +524,17 @@ python scripts/test_pipeline.py
 
 MIT © 2026 Isaac Horowitz. See [`LICENSE`](LICENSE).
 
-Built with [MLX](https://github.com/ml-explore/mlx), [parakeet-mlx](https://github.com/senstella/parakeet-mlx), [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms), and [sentence-transformers](https://www.sbert.net/). Model weights from the Qwen team, NVIDIA Parakeet, OpenAI Whisper, and the MLX community. Witzper would not exist without any of them.
+Built by [Ziplyne](https://ziplyne.agency).
+
+Built with [MLX](https://github.com/ml-explore/mlx), [parakeet-mlx](https://github.com/senstella/parakeet-mlx), [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms), [sentence-transformers](https://www.sbert.net/), [Silero VAD](https://github.com/snakers4/silero-vad), and [pyannote.audio](https://github.com/pyannote/pyannote-audio). Witzper would not exist without any of them.
+
+Model weights are downloaded on demand from each upstream author. Please review and comply with each model's license before redistribution:
+
+| Model | Upstream | License |
+| :---- | :------- | :------ |
+| Qwen3 family (4B / 8B / 14B / 30B-A3B) | [Qwen team](https://github.com/QwenLM/Qwen3) | [Apache 2.0 / Qwen Research License](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507/blob/main/LICENSE) |
+| Parakeet TDT 0.6B v3 | [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) | [CC BY 4.0](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| Whisper Large v3 / Turbo | [OpenAI](https://github.com/openai/whisper) | [MIT](https://github.com/openai/whisper/blob/main/LICENSE) |
+| Silero VAD | [snakers4](https://github.com/snakers4/silero-vad) | [MIT](https://github.com/snakers4/silero-vad/blob/master/LICENSE) |
+| pyannote segmentation 3.1 | [pyannote](https://huggingface.co/pyannote/segmentation-3.1) | [MIT, gated](https://huggingface.co/pyannote/segmentation-3.1) — requires HF auth + license accept |
+| MLX quantizations | [mlx-community](https://huggingface.co/mlx-community) | Inherit upstream |
