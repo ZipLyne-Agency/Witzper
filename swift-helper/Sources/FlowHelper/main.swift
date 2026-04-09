@@ -229,33 +229,73 @@ final class StreamListener {
 
 // MARK: - Hotkey bindings
 
-/// One configurable shortcut. `flagSet` is the OR of all required modifier
-/// flag bits — single-key bindings have one bit, chords have multiple. The
-/// binding fires when ALL of its bits are simultaneously set in the current
-/// `CGEventFlags`. When two bindings are simultaneously satisfied (e.g. a
-/// single-key binding and a chord that contains it), only the binding with
-/// the maximal flag set fires — see `HotkeyTap.handle`.
+/// Two kinds of triggers:
+///   .modifier — satisfied when a set of modifier flag bits are all high
+///               (fn, right_cmd, chords like right_cmd+right_option).
+///   .key      — satisfied when a raw keycode (F5, F6, space, escape, …)
+///               is held. Tracked via keyDown/keyUp, autorepeat ignored.
+enum HotkeyTrigger {
+    case modifier(CGEventFlags)
+    case key(Int64)
+}
+
+/// Non-modifier virtual keycode table — enough to cover "pick any key you
+/// want" for push-to-talk. Names are lowercase, matching the config format.
+/// Keys that normally type characters (letters, digits) are deliberately
+/// excluded — they'd make the hotkey unusable for typing. Function keys,
+/// arrows, and the "standalone" keys (space/escape/return/tab) are fine.
+let nonModifierKeycodes: [String: Int64] = [
+    "f1": 122, "f2": 120, "f3": 99, "f4": 118,
+    "f5": 96,  "f6": 97,  "f7": 98, "f8": 100,
+    "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+    "f13": 105, "f14": 107, "f15": 113, "f16": 106,
+    "f17": 64,  "f18": 79,  "f19": 80,  "f20": 90,
+    "escape": 53, "space": 49, "return": 36, "tab": 48,
+    "left": 123, "right": 124, "down": 125, "up": 126,
+]
+
+/// One configurable shortcut. When two modifier bindings are simultaneously
+/// satisfied (e.g. a single-key binding and a chord that contains it), only
+/// the binding with the maximal flag set fires — see `HotkeyTap.handle`.
 struct HotkeyBinding {
     let action: String
     let rawKey: String
-    let flagSet: CGEventFlags
+    let trigger: HotkeyTrigger
     var isDown: Bool = false
-    var isCapsLock: Bool { flagSet == .maskAlphaShift }
+
+    var modifierFlags: CGEventFlags {
+        if case .modifier(let f) = trigger { return f } else { return [] }
+    }
+    var keycode: Int64? {
+        if case .key(let k) = trigger { return k } else { return nil }
+    }
+    var isCapsLock: Bool { modifierFlags == .maskAlphaShift }
 }
 
-/// Parse a hotkey name like "fn" or "right_cmd+right_option" into the OR of
-/// the matching CGEventFlags bits. Returns nil if any token is unknown or
-/// the input is empty.
-func parseHotkeyFlags(_ name: String) -> CGEventFlags? {
-    let trimmed = name.trimmingCharacters(in: .whitespaces)
+/// Parse a hotkey name into a trigger. Modifier chords (`"right_cmd+right_option"`)
+/// become `.modifier`, single non-modifier keys (`"f5"`, `"space"`) become
+/// `.key`. Mixing modifiers and non-modifiers isn't supported yet.
+func parseHotkeyTrigger(_ name: String) -> HotkeyTrigger? {
+    let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
     if trimmed.isEmpty { return nil }
+    // Non-modifier single key (no chord form supported yet).
+    if !trimmed.contains("+"), let kc = nonModifierKeycodes[trimmed] {
+        return .key(kc)
+    }
     var result: CGEventFlags = []
     for token in trimmed.split(separator: "+") {
         let key = String(token).trimmingCharacters(in: .whitespaces)
         guard let hk = Hotkey(rawValue: key) else { return nil }
         result.insert(hk.flag)
     }
-    return result.isEmpty ? nil : result
+    return result.isEmpty ? nil : .modifier(result)
+}
+
+/// Legacy name kept for the settings loader which only deals with modifier
+/// bindings. Returns nil for keycode-based triggers.
+func parseHotkeyFlags(_ name: String) -> CGEventFlags? {
+    if case .modifier(let f) = parseHotkeyTrigger(name) ?? .key(0) { return f }
+    return nil
 }
 
 // MARK: - Hotkey tap
@@ -277,7 +317,9 @@ final class HotkeyTap {
     }
 
     func start() {
-        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let mask = (1 << CGEventType.flagsChanged.rawValue)
+                 | (1 << CGEventType.keyDown.rawValue)
+                 | (1 << CGEventType.keyUp.rawValue)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -304,15 +346,36 @@ final class HotkeyTap {
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
+        // Non-modifier key bindings are driven by keyDown / keyUp.
+        if type == .keyDown || type == .keyUp {
+            let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if isRepeat { return }
+            for i in bindings.indices {
+                guard let kc = bindings[i].keycode, kc == keycode else { continue }
+                if type == .keyDown && !bindings[i].isDown {
+                    bindings[i].isDown = true
+                    onDown(bindings[i].action)
+                } else if type == .keyUp && bindings[i].isDown {
+                    bindings[i].isDown = false
+                    onUp(bindings[i].action)
+                }
+            }
+            return
+        }
         guard type == .flagsChanged else { return }
         let flags = event.flags
 
-        // 1. Determine which bindings are physically satisfied right now.
+        // 1. Determine which modifier bindings are physically satisfied.
+        //    Key (non-modifier) bindings are driven by keyDown/keyUp above
+        //    and must not be touched here.
         var satisfied = Set<Int>()
         for i in bindings.indices {
             let b = bindings[i]
+            if b.keycode != nil { continue }
             if b.isCapsLock { continue } // handled separately below
-            if !b.flagSet.isEmpty && flags.contains(b.flagSet) {
+            let fs = b.modifierFlags
+            if !fs.isEmpty && flags.contains(fs) {
                 satisfied.insert(i)
             }
         }
@@ -321,10 +384,10 @@ final class HotkeyTap {
         //    other satisfied binding is a strict superset of its flagSet.
         var primary = Set<Int>()
         for i in satisfied {
-            let me = bindings[i].flagSet
+            let me = bindings[i].modifierFlags
             var superseded = false
             for j in satisfied where j != i {
-                let other = bindings[j].flagSet
+                let other = bindings[j].modifierFlags
                 if other.rawValue & me.rawValue == me.rawValue && other != me {
                     superseded = true
                     break
@@ -332,8 +395,8 @@ final class HotkeyTap {
             }
             if !superseded { primary.insert(i) }
         }
-        // 3. Reconcile each binding's down state.
-        for i in bindings.indices where !bindings[i].isCapsLock {
+        // 3. Reconcile each modifier binding's down state.
+        for i in bindings.indices where bindings[i].keycode == nil && !bindings[i].isCapsLock {
             let shouldBeDown = primary.contains(i)
             if shouldBeDown && !bindings[i].isDown {
                 bindings[i].isDown = true
@@ -551,6 +614,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dashItem.target = self
         menu.addItem(dashItem)
 
+        let startDaemonItem = NSMenuItem(
+            title: "Start / Restart Python Daemon",
+            action: #selector(menuRestartDaemon),
+            keyEquivalent: "r"
+        )
+        startDaemonItem.target = self
+        menu.addItem(startDaemonItem)
+
         let testItem = NSMenuItem(
             title: "▶ Test (sound + HUD, 2s)",
             action: #selector(runTest),
@@ -707,6 +778,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         tap.start()
         self.retainedTap = tap
+
+        // Ensure the Python daemon is up. Opening Witzper.app from
+        // /Applications should "just work" without a separate terminal.
+        DispatchQueue.global().async { [weak self] in
+            self?.ensureDaemonRunning()
+        }
 
         // First-launch onboarding: shows permissions + mic picker flow.
         if !UserDefaults.standard.bool(forKey: "witzperOnboardingComplete") {
@@ -894,6 +971,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? lines.joined(separator: "\n").write(to: path, atomically: true, encoding: .utf8)
     }
 
+    /// Spawn the Python daemon if it isn't already running. Called on app
+    /// launch so opening Witzper.app from /Applications is a one-click start
+    /// — previously the user had to manually run ``python -m flow run``.
+    func ensureDaemonRunning() {
+        let check = Process()
+        check.launchPath = "/usr/bin/pgrep"
+        check.arguments = ["-f", "flow run"]
+        let pipe = Pipe()
+        check.standardOutput = pipe
+        check.standardError = Pipe()
+        do { try check.run() } catch { return }
+        check.waitUntilExit()
+        let data = pipe.fileHandleForReading.availableData
+        let output = String(data: data, encoding: .utf8) ?? ""
+        if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            FileHandle.standardError.write(
+                "Witzper: python daemon already running — skip spawn\n".data(using: .utf8)!
+            )
+            return
+        }
+        FileHandle.standardError.write(
+            "Witzper: spawning python daemon…\n".data(using: .utf8)!
+        )
+        spawnPythonDaemon()
+    }
+
+    /// Spawn the daemon unconditionally. Tries the native ./Witzper launcher
+    /// first (shows "Witzper" in Activity Monitor), falls back to plain
+    /// ``python -m flow run``. Both are detached via nohup+background so
+    /// they outlive the Swift helper's own lifecycle if it crashes.
+    func spawnPythonDaemon() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let script = """
+        cd \(home)/Witzper && \
+        if [[ -f .venv/bin/activate ]]; then source .venv/bin/activate; fi && \
+        export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH && \
+        if [[ -x ./Witzper ]]; then \
+          nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
+        else \
+          nohup python3 -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
+        fi
+        """
+        let spawn = Process()
+        spawn.launchPath = "/bin/zsh"
+        spawn.arguments = ["-c", script]
+        do {
+            try spawn.run()
+        } catch {
+            FileHandle.standardError.write(
+                "Witzper: failed to spawn daemon: \(error)\n".data(using: .utf8)!
+            )
+        }
+    }
+
     func restartPythonDaemon() {
         // Kill existing python -m flow processes
         let task = Process()
@@ -923,6 +1054,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         spawn.launchPath = "/bin/zsh"
         spawn.arguments = ["-c", script]
         try? spawn.run()
+    }
+
+    @objc func menuRestartDaemon() {
+        restartPythonDaemon()
     }
 
     @objc func openDashboard() {
@@ -1043,27 +1178,25 @@ func loadHotkeyBindings(legacyFallback: Hotkey) -> [HotkeyBinding] {
         found = true
         let action = String(name.dropFirst("hotkeys.".count))
         guard let key = kv["key"], !key.isEmpty,
-              let flags = parseHotkeyFlags(key) else { continue }
-        out.append(HotkeyBinding(action: action, rawKey: key, flagSet: flags))
+              let trig = parseHotkeyTrigger(key) else { continue }
+        out.append(HotkeyBinding(action: action, rawKey: key, trigger: trig))
     }
     if !found {
-        // Default registry: dictate uses the legacy single-key field (or
-        // the CLI fallback), command uses the documented chord.
         let dictateKey: String
         if let kv = sections["hotkey"], let k = kv["key"], !k.isEmpty {
             dictateKey = k
         } else {
             dictateKey = legacyFallback.rawValue
         }
-        if let flags = parseHotkeyFlags(dictateKey) {
+        if let trig = parseHotkeyTrigger(dictateKey) {
             out.append(HotkeyBinding(
-                action: "dictate", rawKey: dictateKey, flagSet: flags
+                action: "dictate", rawKey: dictateKey, trigger: trig
             ))
         }
         let chord = "right_cmd+right_option"
-        if let flags = parseHotkeyFlags(chord) {
+        if let trig = parseHotkeyTrigger(chord) {
             out.append(HotkeyBinding(
-                action: "command", rawKey: chord, flagSet: flags
+                action: "command", rawKey: chord, trigger: trig
             ))
         }
     }

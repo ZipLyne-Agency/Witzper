@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from collections.abc import Iterator
 
 import numpy as np
@@ -101,7 +102,15 @@ class AudioCapture:
         return audio.astype(np.float32)
 
     def stop(self) -> np.ndarray:
-        """Stop recording and return the captured mono waveform as float32 [-1, 1]."""
+        """Stop recording and return the captured mono waveform as float32 [-1, 1].
+
+        Keeps the callback enqueueing for ``cfg.trailing_ms`` after the key
+        release so we don't chop the tail of the user's final word — see
+        ``AudioCfg.trailing_ms`` for the rationale.
+        """
+        trailing_ms = max(0, int(getattr(self.cfg, "trailing_ms", 0)))
+        if trailing_ms > 0:
+            time.sleep(trailing_ms / 1000.0)
         self._recording.clear()
         return self.snapshot()
 

@@ -38,6 +38,12 @@ class AudioCfg(BaseModel):
     channels: int = 1
     device: str = "default"
     max_seconds: int = 120
+    # Keep recording for this many ms AFTER the user releases the hotkey.
+    # CoreAudio delivers in ~30 ms blocks and humans release the key at the
+    # exact instant they finish speaking — without this pad, the last word's
+    # tail gets chopped. 250 ms is imperceptible to the user but captures the
+    # final fricatives / stop releases reliably.
+    trailing_ms: int = 250
 
 
 class VadCfg(BaseModel):

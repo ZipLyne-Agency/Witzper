@@ -12,6 +12,14 @@ import numpy as np
 
 from flow.config import VadCfg
 
+# Keep this much audio after the last detected speech sample. Stop consonants
+# (/t/, /k/, /p/) and final fricatives have low energy that VAD often marks
+# as silence — trimming to the exact boundary clips them and hurts ASR on the
+# last word. 150 ms is below perceptual latency and well inside the ASR's
+# tolerance for trailing silence.
+_TRAIL_PAD_MS = 150
+_LEAD_PAD_MS = 60
+
 
 class VADBackend(Protocol):
     def trim(self, audio: np.ndarray, sr: int) -> np.ndarray: ...
@@ -37,8 +45,8 @@ class SileroVAD:
         ts = self._get_speech_timestamps(wav, self._model, sampling_rate=sr)
         if not ts:
             return audio  # fall through; let ASR handle silence
-        start = ts[0]["start"]
-        end = ts[-1]["end"]
+        start = max(0, ts[0]["start"] - int(sr * _LEAD_PAD_MS / 1000))
+        end = min(audio.shape[0], ts[-1]["end"] + int(sr * _TRAIL_PAD_MS / 1000))
         return audio[start:end]
 
 
@@ -67,8 +75,8 @@ class PyannoteVAD:
         timeline = vad.get_timeline().support()
         if not timeline:
             return audio
-        start = int(timeline[0].start * sr)
-        end = int(timeline[-1].end * sr)
+        start = int(timeline[0].start * sr) - int(sr * _LEAD_PAD_MS / 1000)
+        end = int(timeline[-1].end * sr) + int(sr * _TRAIL_PAD_MS / 1000)
         return audio[max(0, start) : min(len(audio), end)]
 
 

@@ -17,14 +17,27 @@ struct SettingsView: View {
     /// User-selectable shortcut options. Empty string disables the binding.
     private static let shortcutChoices: [(String, String)] = [
         ("",                          "— disabled —"),
+        // Modifier keys (hold-to-talk friendly)
         ("fn",                        "fn (Function)"),
         ("right_option",              "Right ⌥ Option"),
         ("right_cmd",                 "Right ⌘ Command"),
         ("right_shift",               "Right ⇧ Shift"),
         ("caps_lock",                 "⇪ Caps Lock"),
+        // Modifier chords
         ("right_cmd+right_option",    "Right ⌘ + Right ⌥"),
         ("right_cmd+right_shift",     "Right ⌘ + Right ⇧"),
         ("right_option+right_shift",  "Right ⌥ + Right ⇧"),
+        // Function keys
+        ("f1",  "F1"),  ("f2",  "F2"),  ("f3",  "F3"),  ("f4",  "F4"),
+        ("f5",  "F5"),  ("f6",  "F6"),  ("f7",  "F7"),  ("f8",  "F8"),
+        ("f9",  "F9"),  ("f10", "F10"), ("f11", "F11"), ("f12", "F12"),
+        ("f13", "F13"), ("f14", "F14"), ("f15", "F15"), ("f16", "F16"),
+        ("f17", "F17"), ("f18", "F18"), ("f19", "F19"), ("f20", "F20"),
+        // Other standalone keys
+        ("space",  "Space"),
+        ("escape", "Escape"),
+        ("return", "Return"),
+        ("tab",    "Tab"),
     ]
 
     var body: some View {
