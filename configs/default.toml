@@ -25,7 +25,7 @@ sample_rate = 16000
 channels = 1
 device = "default"
 # Max utterance length in seconds (safety cap)
-max_seconds = 120
+max_seconds = 300
 
 [vad]
 # "silero" (default — ungated, fast) or "pyannote" (requires HF auth + license accept)

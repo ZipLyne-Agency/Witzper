@@ -37,7 +37,7 @@ class AudioCfg(BaseModel):
     sample_rate: int = 16000
     channels: int = 1
     device: str = "default"
-    max_seconds: int = 120
+    max_seconds: int = 300
     # Keep recording for this many ms AFTER the user releases the hotkey.
     # CoreAudio delivers in ~30 ms blocks and humans release the key at the
     # exact instant they finish speaking — without this pad, the last word's

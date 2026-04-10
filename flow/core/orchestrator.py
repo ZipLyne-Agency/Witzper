@@ -103,6 +103,7 @@ class Orchestrator:
 
         self._busy = asyncio.Lock()
         self._utterance_task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # Streaming / pre-flight ASR state
         self._stream_stop = threading.Event()
@@ -110,6 +111,10 @@ class Orchestrator:
         self._last_partial_text: str = ""
         self._last_partial_samples: int = 0
         self._stream_lock = threading.Lock()
+
+        # Wire up the max-duration auto-stop so AudioCapture can trigger
+        # the same pipeline as a normal key-up when the limit is hit.
+        self.audio.set_on_max_reached(self._on_max_duration_reached)
 
     def _get_asr(self, mode: str) -> ASRBackend:
         if mode == "accuracy":
@@ -123,6 +128,17 @@ class Orchestrator:
         if self.cfg.asr.mode in ("speed", "accuracy"):
             return self.cfg.asr.mode
         return app_ctx.rule.asr_mode if app_ctx and app_ctx.rule else "speed"
+
+    # ---- Max-duration auto-stop ------------------------------------------
+
+    def _on_max_duration_reached(self) -> None:
+        """Called from AudioCapture's timer thread when max_seconds expires.
+
+        Schedules on_up() on the event loop so the full pipeline runs just
+        as if the user released the hotkey.
+        """
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.on_up)
 
     # ---- Hotkey callbacks -------------------------------------------------
 
@@ -312,7 +328,10 @@ class Orchestrator:
                 "total_ms": (t_insert - t0) * 1000,
             })
 
-            # 7. Arm the edit watcher so later edits become training signal
+            # 7. Successful — clean up the crash-recovery file
+            self.audio.cleanup_recovery()
+
+            # 8. Arm the edit watcher so later edits become training signal
             self.edit_watcher.arm(
                 raw_transcript=raw.text,
                 inserted_text=final,
@@ -342,6 +361,7 @@ class Orchestrator:
     # ---- Main loop --------------------------------------------------------
 
     async def run_forever(self) -> None:
+        self._loop = asyncio.get_running_loop()
         router = HotkeyRouter()
         router.register("dictate", self.on_down, self.on_up)
         if self.cfg.command.enabled:
