@@ -82,6 +82,24 @@ class Orchestrator:
             verbose=verbose,
         )
 
+        # Pipeline state — initialized here, not in _emit_stats.
+        self._busy = asyncio.Lock()
+        self._utterance_task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._recording_active = False
+        self._prefetched_app_ctx = None
+
+        # Streaming / pre-flight ASR state
+        self._stream_stop = threading.Event()
+        self._stream_thread: threading.Thread | None = None
+        self._last_partial_text: str = ""
+        self._last_partial_samples: int = 0
+        self._stream_lock = threading.Lock()
+
+        # Wire up the max-duration auto-stop so AudioCapture can trigger
+        # the same pipeline as a normal key-up when the limit is hit.
+        self.audio.set_on_max_reached(self._on_max_duration_reached)
+
         # Start the dashboard event stream socket
         stream.get_server()
         self._emit_stats()
@@ -100,21 +118,6 @@ class Orchestrator:
                 "other": self.cfg.styles.other,
             },
         })
-
-        self._busy = asyncio.Lock()
-        self._utterance_task: asyncio.Task | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-
-        # Streaming / pre-flight ASR state
-        self._stream_stop = threading.Event()
-        self._stream_thread: threading.Thread | None = None
-        self._last_partial_text: str = ""
-        self._last_partial_samples: int = 0
-        self._stream_lock = threading.Lock()
-
-        # Wire up the max-duration auto-stop so AudioCapture can trigger
-        # the same pipeline as a normal key-up when the limit is hit.
-        self.audio.set_on_max_reached(self._on_max_duration_reached)
 
     def _get_asr(self, mode: str) -> ASRBackend:
         if mode == "accuracy":
@@ -145,13 +148,18 @@ class Orchestrator:
     def on_down(self) -> None:
         if self.verbose:
             console.print("[cyan]⏺ recording[/]")
+        self._recording_active = True
         self.audio.start()
         stream.emit({"type": "recording", "state": "start"})
+        # Capture app context NOW — the focused app won't change while the
+        # user holds the hotkey, and this saves ~100ms of socket RPC from
+        # the latency-critical _process() path after key release.
+        self._prefetched_app_ctx = self.app_context.snapshot()
         # Reset partial state and launch the streaming ASR loop.
         with self._stream_lock:
             self._last_partial_text = ""
             self._last_partial_samples = 0
-        if getattr(self.cfg.asr, "streaming", False):
+        if self.cfg.asr.streaming:
             self._stream_stop = threading.Event()
             self._stream_thread = threading.Thread(
                 target=self._stream_partials_loop, daemon=True
@@ -159,6 +167,9 @@ class Orchestrator:
             self._stream_thread.start()
 
     def on_up(self) -> None:
+        if not self._recording_active:
+            return  # guard against double-fire (max-duration + key release)
+        self._recording_active = False
         if self.verbose:
             console.print("[cyan]⏹ processing[/]")
         # Signal the streaming loop to stop, then drain the trailing audio
@@ -168,30 +179,16 @@ class Orchestrator:
         audio = self.audio.stop()
         stream.emit({"type": "recording", "state": "stop"})
         if self._stream_thread is not None:
-            # Must join before touching asr_speed again — most backends
-            # aren't thread-safe. Short timeout: the stop flag + trailing_ms
-            # sleep already gave the loop a chance to exit cleanly.
-            self._stream_thread.join(timeout=1.0)
+            # The streaming loop checks _stream_stop every interval (~200ms).
+            # audio.stop() already slept trailing_ms (250ms) so the thread
+            # should have exited by now. Short timeout for safety.
+            self._stream_thread.join(timeout=0.3)
             self._stream_thread = None
         if audio.size == 0:
             return
-        # Run one last partial ASR pass on the fully-drained buffer. This
-        # (a) guarantees the cached partial covers the trailing word and
-        # (b) lets _process reuse it instead of re-transcribing from scratch,
-        # so the "final" ASR pass on key-release is eliminated.
-        if getattr(self.cfg.asr, "streaming", False):
-            try:
-                result = self.asr_speed.transcribe(
-                    audio, sample_rate=self.cfg.audio.sample_rate
-                )
-                text = (result.text or "").strip()
-                with self._stream_lock:
-                    self._last_partial_text = text
-                    self._last_partial_samples = int(audio.size)
-                stream.emit({"type": "partial", "text": text})
-            except Exception as e:  # noqa: BLE001
-                if self.verbose:
-                    console.print(f"[yellow]final partial asr failed: {e}[/]")
+        # No final ASR here — _process() uses pre-flight reuse for long
+        # recordings (partial covers >99% of audio) and runs a fast fresh
+        # ASR for short ones. This eliminates 80-500ms of event-loop blocking.
         self._utterance_task = asyncio.create_task(self._process(audio))
 
     # ---- Streaming partial ASR loop --------------------------------------
@@ -230,8 +227,8 @@ class Orchestrator:
         async with self._busy:
             t0 = time.perf_counter()
 
-            # 1. Focused app context (bundle id, window title, surrounding text)
-            app_ctx = self.app_context.snapshot()
+            # 1. Use app context captured at key-down (saves ~100ms socket RPC).
+            app_ctx = self._prefetched_app_ctx
 
             # 2. VAD trim
             trimmed = self.vad.trim(audio, sr=self.cfg.audio.sample_rate)
@@ -247,7 +244,7 @@ class Orchestrator:
             raw: ASRResult | None = None
             if (
                 mode == "speed"
-                and getattr(self.cfg.asr, "streaming", False)
+                and self.cfg.asr.streaming
                 and trimmed.size > 0
             ):
                 with self._stream_lock:
@@ -302,7 +299,7 @@ class Orchestrator:
                 strip_punct_on_solo=self.cfg.snippets.strip_trailing_punct_on_solo_trigger,
             )
 
-            # 6. Insert
+            # 7. Insert — everything above this line is latency-critical.
             self.inserter.insert(final, app_ctx=app_ctx)
             t_insert = time.perf_counter()
 
@@ -328,17 +325,23 @@ class Orchestrator:
                 "total_ms": (t_insert - t0) * 1000,
             })
 
-            # 7. Successful — clean up the crash-recovery file
-            self.audio.cleanup_recovery()
+            # ---- Post-insert (not latency-critical) ----
+            # These run after the text is already pasted, so they don't
+            # affect perceived speed. Release the _busy lock first so a
+            # rapid follow-up dictation isn't blocked by WAV I/O.
 
-            # 8. Arm the edit watcher so later edits become training signal
-            self.edit_watcher.arm(
-                raw_transcript=raw.text,
-                inserted_text=final,
-                app_ctx=app_ctx,
-                audio=trimmed,
-                sample_rate=self.cfg.audio.sample_rate,
-            )
+        # Outside _busy lock: crash-recovery cleanup + edit watcher.
+        # edit_watcher.arm() writes the audio WAV to disk which can take
+        # tens of ms for long recordings — keeping it outside the lock
+        # means the next dictation can start processing immediately.
+        self.audio.cleanup_recovery()
+        self.edit_watcher.arm(
+            raw_transcript=raw.text,
+            inserted_text=final,
+            app_ctx=app_ctx,
+            audio=trimmed,
+            sample_rate=self.cfg.audio.sample_rate,
+        )
 
     def _asr_context_prompt(self, app_ctx, boost_terms: list[str]) -> str | None:
         if not app_ctx:

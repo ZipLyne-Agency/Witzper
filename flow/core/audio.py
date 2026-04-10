@@ -31,6 +31,11 @@ class AudioCapture:
         self._stream: sd.InputStream | None = None
         self._recording = threading.Event()
         self._frames: list[np.ndarray] = []
+        # Lock protecting _frames and the incremental snapshot cache.
+        # snapshot() is called from the streaming ASR thread, the recovery
+        # flush timer thread, and the main thread (via stop()) — all
+        # concurrently.
+        self._frames_lock = threading.Lock()
         # Incremental snapshot cache — avoids re-concatenating all frames on
         # every snapshot() call, which was O(n²) over the recording duration.
         self._concat_cache: np.ndarray = np.zeros(0, dtype=np.float32)
@@ -131,24 +136,25 @@ class AudioCapture:
         on every call, which was O(n²) over the recording duration and caused
         the streaming ASR loop to stall on long recordings.
         """
-        self._drain()
-        if not self._frames:
-            return np.zeros(0, dtype=np.float32)
-        n = len(self._frames)
-        if n > self._concat_frames_count:
-            new = self._frames[self._concat_frames_count:]
-            new_block = np.concatenate(new, axis=0)
-            if new_block.ndim > 1:
-                new_block = new_block.mean(axis=1)
-            new_block = new_block.astype(np.float32)
-            if self._concat_cache.size == 0:
-                self._concat_cache = new_block
-            else:
-                self._concat_cache = np.concatenate(
-                    [self._concat_cache, new_block]
-                )
-            self._concat_frames_count = n
-        return self._concat_cache
+        with self._frames_lock:
+            self._drain()
+            if not self._frames:
+                return np.zeros(0, dtype=np.float32)
+            n = len(self._frames)
+            if n > self._concat_frames_count:
+                new = self._frames[self._concat_frames_count:]
+                new_block = np.concatenate(new, axis=0)
+                if new_block.ndim > 1:
+                    new_block = new_block.mean(axis=1)
+                new_block = new_block.astype(np.float32)
+                if self._concat_cache.size == 0:
+                    self._concat_cache = new_block
+                else:
+                    self._concat_cache = np.concatenate(
+                        [self._concat_cache, new_block]
+                    )
+                self._concat_frames_count = n
+            return self._concat_cache
 
     def stop(self) -> np.ndarray:
         """Stop recording and return the captured mono waveform as float32 [-1, 1].

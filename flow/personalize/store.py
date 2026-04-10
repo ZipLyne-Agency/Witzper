@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -64,7 +65,13 @@ class CorrectionStore:
         audio_path: str | None = None
         if audio is not None and audio.size and sample_rate:
             audio_path = str(self._audio_dir / f"{cid}.wav")
-            sf.write(audio_path, audio, sample_rate)
+            # Write audio in a background thread — a 5-minute recording is
+            # ~19 MB of WAV which takes tens of ms to flush. This keeps the
+            # caller (edit_watcher.arm) from blocking.
+            a, sr, p = audio.copy(), sample_rate, audio_path
+            threading.Thread(
+                target=sf.write, args=(p, a, sr), daemon=True
+            ).start()
         self._conn.execute(
             """
             INSERT INTO corrections

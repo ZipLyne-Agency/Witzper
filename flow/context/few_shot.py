@@ -13,6 +13,7 @@ out for new rows) so upgrading from an older Witzper install is zero-touch.
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 from rapidfuzz import fuzz, process
@@ -20,6 +21,9 @@ from rapidfuzz import fuzz, process
 from flow.models.cleanup import FewShotExample
 
 DEFAULT_DB = Path.home() / ".local" / "share" / "Witzper" / "few_shot.db"
+
+# Reload cached examples from SQLite at most this often (seconds).
+_CACHE_TTL_S = 30
 
 
 class FewShotRetriever:
@@ -40,6 +44,8 @@ class FewShotRetriever:
             """
         )
         self._conn.commit()
+        self._cached_rows: list[tuple[str, str]] = []
+        self._cache_time: float = 0
 
     @classmethod
     def open_default(cls) -> FewShotRetriever:
@@ -51,9 +57,21 @@ class FewShotRetriever:
             (raw, cleaned),
         )
         self._conn.commit()
+        # Invalidate cache so the new example is available immediately.
+        self._cache_time = 0
+
+    def _load_rows(self) -> list[tuple[str, str]]:
+        now = time.monotonic()
+        if now - self._cache_time < _CACHE_TTL_S and self._cached_rows:
+            return self._cached_rows
+        self._cached_rows = list(
+            self._conn.execute("SELECT raw, cleaned FROM examples")
+        )
+        self._cache_time = now
+        return self._cached_rows
 
     def retrieve(self, raw: str, n: int = 5) -> list[FewShotExample]:
-        rows = list(self._conn.execute("SELECT raw, cleaned FROM examples"))
+        rows = self._load_rows()
         if not rows:
             return []
         raw_texts = [r[0] for r in rows]
