@@ -72,7 +72,6 @@ class ParakeetASR:
         """
         if audio.size == 0:
             return ASRResult(text="")
-        import mlx.core as mx
         from parakeet_mlx.audio import get_logmel
 
         arr = _to_mx(audio, sample_rate, self._sample_rate)
@@ -104,7 +103,7 @@ class ParakeetASR:
         return self._model.transcribe_stream()
 
 
-def _to_mx(audio: np.ndarray, sample_rate: int, target_sr: int) -> "mx.array":
+def _to_mx(audio: np.ndarray, sample_rate: int, target_sr: int) -> mx.array:
     """Convert a numpy float32 buffer into an mx.array at the model's sample
     rate. We assume the AudioCapture layer already matches target_sr (16 kHz
     for Parakeet), which it does by default, so this is just a dtype cast.

@@ -56,8 +56,8 @@ final class MicMeterDriver: ObservableObject {
         // Decay peak hold so the marker doesn't stick at 1.0 forever.
         decayTimer?.invalidate()
         decayTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
             Task { @MainActor in
-                guard let self = self else { return }
                 self.peakHold = max(0, self.peakHold - 0.01)
             }
         }

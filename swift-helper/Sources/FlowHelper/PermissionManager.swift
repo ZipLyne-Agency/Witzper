@@ -151,7 +151,8 @@ final class PermissionWatcher: ObservableObject {
         timer?.invalidate()
         let interval: TimeInterval = attentive ? 0.5 : 5.0
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+            guard let self = self else { return }
+            Task { @MainActor in self.poll() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
