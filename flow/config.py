@@ -81,6 +81,10 @@ class CleanupCfg(BaseModel):
     few_shot_n: int = 5
     max_length_ratio: float = 3.0
     max_edit_distance_ratio: float = 0.7
+    # Utterances with this many words or fewer skip the LLM cleanup pass
+    # entirely — just capitalization + trailing period. Saves ~40-80ms on
+    # short commands like "hello" or "open mail".
+    passthrough_word_count: int = 2
 
 
 class CommandCfg(BaseModel):

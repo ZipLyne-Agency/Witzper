@@ -4,6 +4,32 @@ The scaffold wires the full pipeline end-to-end. Each component is a
 minimal-but-runnable first pass; the work below is what turns it into a
 production-quality app.
 
+## Recently shipped (this pass)
+
+- [x] Full A-to-Z audit of Swift helper + Python daemon + build & CI
+- [x] Kill the random Accessibility popup on every launch (silent probe +
+      centralized `Permissions` + `PermissionWatcher`)
+- [x] Reactive onboarding with auto-advance when the user flips a
+      permission toggle in System Settings
+- [x] Live mic meter during onboarding (`LiveMicMeter.swift`) so the user
+      sees their voice register before leaving the wizard
+- [x] Press-a-key hotkey picker (`HotkeyCapture.swift`) — replaces the
+      legacy dropdown; full `HotkeyName` translator for fn / right_option
+      / f-keys / modifier pairs
+- [x] New onboarding structure: Welcome → Accessibility → Input Monitoring
+      → Microphone (with live meter) → Hotkey → Models → Ready checklist
+- [x] Menu-bar SF Symbols + pulse animation + dynamic hotkey label
+- [x] Dashboard: bundle-driven version, richer empty state, one-click
+      Export Transcripts
+- [x] Download progress with real MB/s rate, ETA, GB/GB counter
+- [x] Parakeet ASR: skip the tempfile-per-call I/O (numpy → mx.array →
+      get_logmel → generate), warmup pass on init
+- [x] Incremental streaming partials via `transcribe_stream` —
+      partial-ASR loop is now O(delta), not O(total-so-far)
+- [x] Cleanup LLM fast-path: skip the 50-80 ms LLM pass for ultra-short
+      utterances (new `passthrough_word_count` cfg)
+- [x] Cached encoded prefix IDs to shave re-tokenization per cleanup call
+
 ## P0 — get it running
 
 - [ ] `./scripts/setup.sh` — verify on this M5 Max

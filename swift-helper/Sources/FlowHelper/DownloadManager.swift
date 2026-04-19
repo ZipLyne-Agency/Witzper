@@ -14,10 +14,27 @@ struct DownloadState: Equatable {
     var bytesExpected: Int64 = 0
     var isRunning: Bool = false
     var error: String? = nil
+    // Rolling rate (bytes/sec) computed by the poll timer. Used by the UI
+    // to show an accurate MB/s and ETA instead of a dead progress bar.
+    var bytesPerSecond: Double = 0
 
     var progress: Double {
         guard bytesExpected > 0 else { return 0 }
         return min(1.0, Double(bytesDownloaded) / Double(bytesExpected))
+    }
+
+    /// Human-readable throughput label — "12.4 MB/s" or "—" when idle.
+    var rateLabel: String {
+        if bytesPerSecond < 1_000 { return "—" }
+        let mb = bytesPerSecond / 1_000_000
+        if mb >= 1 { return String(format: "%.1f MB/s", mb) }
+        return String(format: "%.0f KB/s", bytesPerSecond / 1_000)
+    }
+
+    /// Approximate ETA in seconds, or nil when we can't compute one.
+    var etaSeconds: Int? {
+        guard bytesPerSecond > 5_000, bytesExpected > bytesDownloaded else { return nil }
+        return Int(Double(bytesExpected - bytesDownloaded) / bytesPerSecond)
     }
 }
 
@@ -120,16 +137,28 @@ final class DownloadManager: ObservableObject {
             return
         }
 
-        // Poll cache dir size every 500 ms.
+        // Poll cache dir size every 500 ms. Track bytes/sec via an EMA so
+        // the ETA display is stable even when `hf` writes files in bursts.
+        var lastBytes = state[modelId]?.bytesDownloaded ?? 0
+        var lastTick = Date()
+        var emaRate: Double = 0
         let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             Task { @MainActor in
                 let mgr = DownloadManager.shared
                 guard var s = mgr.state[modelId], s.isRunning else { return }
                 s.bytesDownloaded = mgr.currentCacheSize(for: modelId)
-                // If the folder already exceeds our estimate, grow the estimate
-                // so the bar still makes sense.
                 if s.bytesDownloaded > s.bytesExpected {
                     s.bytesExpected = s.bytesDownloaded + 100_000_000
+                }
+                let now = Date()
+                let dt = now.timeIntervalSince(lastTick)
+                if dt > 0 {
+                    let delta = max(0, s.bytesDownloaded - lastBytes)
+                    let instant = Double(delta) / dt
+                    emaRate = emaRate == 0 ? instant : (0.3 * instant + 0.7 * emaRate)
+                    s.bytesPerSecond = emaRate
+                    lastBytes = s.bytesDownloaded
+                    lastTick = now
                 }
                 mgr.state[modelId] = s
             }

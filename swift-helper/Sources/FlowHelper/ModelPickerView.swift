@@ -245,6 +245,35 @@ enum UserConfigWriter {
             .appendingPathComponent(".config/Witzper/config.toml")
     }
 
+    /// Read a single key from a section. Returns nil if the file, section or key
+    /// doesn't exist. Values that are wrapped in "..." are returned without the
+    /// surrounding quotes.
+    static func read(section: String, key: String) -> String? {
+        guard let txt = try? String(contentsOf: configPath, encoding: .utf8) else {
+            return nil
+        }
+        var current = ""
+        for raw in txt.components(separatedBy: "\n") {
+            let s = raw.trimmingCharacters(in: .whitespaces)
+            if s.isEmpty || s.hasPrefix("#") { continue }
+            if s.hasPrefix("[") && s.hasSuffix("]") {
+                current = String(s.dropFirst().dropLast())
+                continue
+            }
+            if current != section { continue }
+            if let eq = s.firstIndex(of: "=") {
+                let k = String(s[..<eq]).trimmingCharacters(in: .whitespaces)
+                if k != key { continue }
+                var v = String(s[s.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                if v.hasPrefix("\"") && v.hasSuffix("\"") {
+                    v = String(v.dropFirst().dropLast())
+                }
+                return v
+            }
+        }
+        return nil
+    }
+
     /// Set a key inside a section. configSection may use dots to nest, e.g. "asr.speed".
     /// We always write top-level "[section]" headers and dotted keys ARE supported only
     /// for the asr.speed/asr.accuracy case which writes [asr.speed] section.

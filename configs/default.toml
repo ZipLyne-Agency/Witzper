@@ -45,9 +45,9 @@ mode = "auto"
 # partial covered ≥streaming_reuse_ratio of the final audio, the cleanup LLM
 # runs immediately on that partial — cutting perceived latency roughly in half.
 streaming = true
-streaming_interval_ms = 350
+streaming_interval_ms = 200
 streaming_min_audio_ms = 350
-streaming_reuse_ratio = 0.95
+streaming_reuse_ratio = 0.92
 
 [asr.speed]
 model = "mlx-community/parakeet-tdt-0.6b-v3"

@@ -19,55 +19,64 @@ import SwiftUI
 import ApplicationServices
 import IOKit.hid
 
-// MARK: - Permission probing
-
-enum OnboardingPermission {
-    static var accessibilityGranted: Bool {
-        AXIsProcessTrusted()
-    }
-
-    static var inputMonitoringGranted: Bool {
-        // IOHIDCheckAccess returns .granted when Input Monitoring is on.
-        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-    }
-
-    static var microphoneGranted: Bool {
-        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-    }
-}
-
 // MARK: - Shared state
 
+/// Backs the setup wizard. Mirrors the live PermissionWatcher so the step
+/// ticks green the instant the user flips a toggle in System Settings,
+/// and auto-advances past permission steps when the user grants access
+/// while looking at the step.
 @MainActor
 final class OnboardingState: ObservableObject {
     static let shared = OnboardingState()
 
     @Published var step: Int = 0
-    @Published var axGranted: Bool = OnboardingPermission.accessibilityGranted
-    @Published var imGranted: Bool = OnboardingPermission.inputMonitoringGranted
-    @Published var micGranted: Bool = OnboardingPermission.microphoneGranted
+    @Published var axGranted: Bool = Permissions.current().accessibility
+    @Published var imGranted: Bool = Permissions.current().inputMonitoring
+    @Published var micGranted: Bool = Permissions.current().microphone
     @Published var selectedMic: String = "System Default"
     @Published var availableMics: [String] = []
+    @Published var hotkeyDictate: String = "fn"
 
-    private var timer: Timer?
+    private var cancellables: Set<AnyCancellable> = []
 
     func startPolling() {
         refreshMics()
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            Task { @MainActor in
-                let st = OnboardingState.shared
-                st.axGranted = OnboardingPermission.accessibilityGranted
-                st.imGranted = OnboardingPermission.inputMonitoringGranted
-                st.micGranted = OnboardingPermission.microphoneGranted
+        hotkeyDictate = UserConfigWriter.read(section: "hotkeys.dictate", key: "key") ?? "fn"
+        PermissionWatcher.shared.setAttentive(true)
+        // Subscribe to the centralized watcher so the three published
+        // booleans here are driven by a single source of truth and we
+        // never drift. Also auto-advance when a permission flips from
+        // off→on while the user is looking at that specific step — that's
+        // the UX Wispr/Flow/etc. all do.
+        PermissionWatcher.shared.$status
+            .receive(on: RunLoop.main)
+            .sink { [weak self] s in
+                guard let self = self else { return }
+                let prevAX = self.axGranted
+                let prevIM = self.imGranted
+                let prevMic = self.micGranted
+                self.axGranted = s.accessibility
+                self.imGranted = s.inputMonitoring
+                self.micGranted = s.microphone
+                if !prevAX && s.accessibility && self.step == 1 {
+                    withAnimation { self.step = 2 }
+                }
+                if !prevIM && s.inputMonitoring && self.step == 2 {
+                    withAnimation { self.step = 3 }
+                }
+                if !prevMic && s.microphone && self.step == 3 {
+                    // Don't skip the mic step — the user needs to pick a
+                    // device. Just refresh the list so new devices show up
+                    // now that we're allowed to enumerate them.
+                    self.refreshMics()
+                }
             }
-        }
-        RunLoop.main.add(timer!, forMode: .common)
+            .store(in: &cancellables)
     }
 
     func stopPolling() {
-        timer?.invalidate()
-        timer = nil
+        cancellables.removeAll()
+        PermissionWatcher.shared.setAttentive(false)
     }
 
     func refreshMics() {
@@ -95,7 +104,7 @@ struct OnboardingView: View {
     @ObservedObject var downloads = DownloadManager.shared
     let close: () -> Void
 
-    private let totalSteps = 5
+    private let totalSteps = 7
 
     var body: some View {
         ZStack {
@@ -109,7 +118,7 @@ struct OnboardingView: View {
                 footer
             }
         }
-        .frame(minWidth: 720, minHeight: 540)
+        .frame(minWidth: 760, minHeight: 580)
         .onAppear { state.startPolling() }
         .onDisappear { state.stopPolling() }
     }
@@ -122,10 +131,24 @@ struct OnboardingView: View {
                 .font(.system(size: 16, weight: .black, design: .monospaced))
                 .foregroundColor(.bbAmber)
             Spacer()
+            stepPips
             Text("STEP \(state.step + 1) / \(totalSteps)")
                 .font(.bbSmall).foregroundColor(.bbDim)
+                .padding(.leading, 12)
         }
         .padding(.horizontal, 20).padding(.vertical, 14)
+    }
+
+    /// A small row of pips under the header — reassures the user there's
+    /// a finite number of steps and shows which ones are already done.
+    private var stepPips: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<totalSteps, id: \.self) { i in
+                Circle()
+                    .fill(i < state.step ? Color.bbGreen : (i == state.step ? Color.bbAmber : Color.bbBorder))
+                    .frame(width: 7, height: 7)
+            }
+        }
     }
 
     @ViewBuilder
@@ -135,7 +158,9 @@ struct OnboardingView: View {
         case 1: accessibilityStep
         case 2: inputMonitoringStep
         case 3: micStep
-        default: modelsStep
+        case 4: hotkeyStep
+        case 5: modelsStep
+        default: readyStep
         }
     }
 
@@ -156,14 +181,16 @@ struct OnboardingView: View {
     private var accessibilityStep: some View {
         permissionStep(
             title: "ACCESSIBILITY",
-            explanation: "Needed so Witzper can watch your global hotkey and read the focused text field for context. Witzper doesn't log keystrokes.",
+            explanation: "Needed so Witzper can watch your global hotkey and read the focused text field for context. Witzper never logs keystrokes or exports what you type.",
             granted: state.axGranted,
             openAction: {
+                // Fire the prompt THEN open System Settings. Calling
+                // requestAX() first is what makes Witzper appear in the
+                // Accessibility list pre-authorized, so the user only has
+                // to flip one toggle. The prompt itself is a no-op if TCC
+                // already has a decision on file.
+                Permissions.requestAX()
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                // Also prompt so the app appears in the list
-                _ = AXIsProcessTrustedWithOptions(
-                    [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-                )
             }
         )
     }
@@ -171,11 +198,11 @@ struct OnboardingView: View {
     private var inputMonitoringStep: some View {
         permissionStep(
             title: "INPUT MONITORING",
-            explanation: "Lets Witzper distinguish modifier keys for the global hotkey (Right Option, Caps Lock, etc.). Without it, the hotkey silently won't fire.",
+            explanation: "Lets Witzper distinguish modifier keys for your global hotkey (Right Option, Caps Lock, fn, etc.). Without it, the hotkey silently won't fire.",
             granted: state.imGranted,
             openAction: {
+                Permissions.requestInputMonitoring()
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
-                _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
             }
         )
     }
@@ -235,13 +262,22 @@ struct OnboardingView: View {
 
             if !state.micGranted {
                 bigButton("REQUEST MICROPHONE ACCESS", color: .bbAmber) {
-                    AVCaptureDevice.requestAccess(for: .audio) { _ in
-                        Task { @MainActor in
-                            OnboardingState.shared.micGranted = OnboardingPermission.microphoneGranted
-                            OnboardingState.shared.refreshMics()
-                        }
+                    Permissions.requestMicrophone { _ in
+                        // PermissionWatcher will pick up the change and
+                        // push it into state automatically. We only need
+                        // to refresh the mic list here — macOS hides
+                        // external devices until after the user grants
+                        // access.
+                        OnboardingState.shared.refreshMics()
                     }
                 }
+            } else {
+                // Live level meter — lets the user confirm the mic is
+                // actually picking up their voice before Witzper even
+                // starts inference. Removes the #1 "I granted permission
+                // but it's not working" support question.
+                LiveMicMeter(deviceName: state.selectedMic)
+                    .frame(height: 34)
             }
 
             Text("SELECT INPUT DEVICE").font(.bbHeader).foregroundColor(.bbAmber)
@@ -275,10 +311,36 @@ struct OnboardingView: View {
         .padding(24)
     }
 
+    private var hotkeyStep: some View {
+        let dictateBinding = Binding<String>(
+            get: { state.hotkeyDictate },
+            set: { state.hotkeyDictate = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("YOUR DICTATION KEY").font(.bbHeader).foregroundColor(.bbAmber)
+            Text("Pick the key you'll hold down to dictate. The most common choices are fn (the Function key on recent MacBooks), Right Option, or Caps Lock. Press any key below to pick it.")
+                .font(.bbBody).foregroundColor(.bbDim)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("DICTATE")
+                    .font(.bbSmall).foregroundColor(.bbDim).frame(width: 90, alignment: .leading)
+                HotkeyCaptureField(rawValue: dictateBinding) { captured in
+                    UserConfigWriter.set(section: "hotkeys.dictate", key: "key", value: captured)
+                    UserConfigWriter.set(section: "hotkeys.dictate", key: "mode", value: "hold")
+                }
+                Spacer()
+            }
+            Text("Don't want to set it right now? Skip — the default is the fn key.")
+                .font(.bbSmall).foregroundColor(.bbDim)
+            Spacer()
+        }
+        .padding(24)
+    }
+
     private var modelsStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("MODELS").font(.bbHeader).foregroundColor(.bbAmber)
-            Text("Witzper needs its default ASR and cleanup LLM before it can dictate. Downloads are one-time; models live in ~/.cache/huggingface.")
+            Text("Witzper needs its default ASR (speech-to-text) and cleanup models before it can dictate. Downloads are one-time; models live in ~/.cache/huggingface.")
                 .font(.bbBody).foregroundColor(.bbDim)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -289,7 +351,12 @@ struct OnboardingView: View {
             }
 
             HStack(spacing: 10) {
-                bigButton("DOWNLOAD ALL REQUIRED", color: .bbAmber) {
+                let allDone = requiredModels.allSatisfy { ModelStatus.isDownloaded($0.id) }
+                let anyRunning = requiredModels.contains(where: { downloads.state[$0.id]?.isRunning == true })
+                bigButton(
+                    allDone ? "ALL DOWNLOADED ✓" : (anyRunning ? "DOWNLOADING…" : "DOWNLOAD ALL REQUIRED"),
+                    color: allDone ? .bbGreen : .bbAmber
+                ) {
                     for m in requiredModels where !ModelStatus.isDownloaded(m.id) {
                         let expected = Int64(max(m.approxRamGB, 0.2) * 1_000_000_000)
                         DownloadManager.shared.start(modelId: m.id, expectedBytes: expected)
@@ -301,6 +368,40 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding(24)
+    }
+
+    private var readyStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("READY")
+                .font(.bbHeader).foregroundColor(.bbGreen)
+            Text("You're all set. Hold down your dictate key, speak, release — Witzper will paste the transcript into whatever you're focused on.")
+                .font(.bbBody).foregroundColor(.bbDim)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                checklist("Accessibility permission", ok: state.axGranted)
+                checklist("Input Monitoring permission", ok: state.imGranted)
+                checklist("Microphone access", ok: state.micGranted)
+                checklist("Dictation hotkey: \(HotkeyName.label(for: state.hotkeyDictate))", ok: !state.hotkeyDictate.isEmpty)
+                let modelsOk = requiredModels.allSatisfy { ModelStatus.isDownloaded($0.id) }
+                checklist("Required models downloaded", ok: modelsOk)
+            }
+            .padding(.top, 4)
+            Text("Tips")
+                .font(.bbHeader).foregroundColor(.bbAmber).padding(.top, 8)
+            Text("· Look for the Witzper mic icon in your menu bar.\n· Open the Dashboard from the menu to see live transcripts and set snippets.\n· Re-open this wizard any time from Settings → Reopen Setup Wizard.")
+                .font(.bbBody).foregroundColor(.bbDim)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(24)
+    }
+
+    private func checklist(_ text: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(ok ? .bbGreen : .bbDim)
+            Text(text).font(.bbBody).foregroundColor(ok ? .bbCyan : .bbDim)
+        }
     }
 
     private var requiredModels: [ModelOption] {
@@ -325,6 +426,11 @@ struct OnboardingView: View {
                 } else if let dl = dl, dl.isRunning {
                     Text(String(format: "%.0f%%", dl.progress * 100))
                         .font(.bbSmall).foregroundColor(.bbAmber)
+                    if let eta = dl.etaSeconds {
+                        Text("·  \(humanEta(eta)) left")
+                            .font(.bbSmall).foregroundColor(.bbDim)
+                    }
+                    Text("·  \(dl.rateLabel)").font(.bbSmall).foregroundColor(.bbDim)
                 } else {
                     Text("NOT DOWNLOADED").font(.bbSmall).foregroundColor(.bbRed)
                 }
@@ -338,10 +444,28 @@ struct OnboardingView: View {
                     }
                 }
                 .frame(height: 5)
+                Text(humanBytes(dl.bytesDownloaded) + " / " + humanBytes(max(dl.bytesExpected, dl.bytesDownloaded)))
+                    .font(.bbSmall).foregroundColor(.bbDim)
+            } else if let err = dl?.error {
+                Text("⚠ " + err).font(.bbSmall).foregroundColor(.bbRed)
             }
         }
         .padding(10)
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.bbBorder, lineWidth: 1))
+    }
+
+    private func humanBytes(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / 1_000_000_000
+        if gb >= 1 { return String(format: "%.2f GB", gb) }
+        let mb = Double(bytes) / 1_000_000
+        if mb >= 1 { return String(format: "%.0f MB", mb) }
+        return String(format: "%.0f KB", Double(bytes) / 1_000)
+    }
+
+    private func humanEta(_ seconds: Int) -> String {
+        if seconds >= 3600 { return String(format: "%dh %dm", seconds / 3600, (seconds % 3600) / 60) }
+        if seconds >= 60 { return String(format: "%dm %ds", seconds / 60, seconds % 60) }
+        return "\(seconds)s"
     }
 
     // --- footer ---

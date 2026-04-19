@@ -196,10 +196,70 @@ class Orchestrator:
     def _stream_partials_loop(self) -> None:
         """Run speed ASR against the growing audio buffer while recording.
 
+        Prefers parakeet-mlx's incremental `transcribe_stream` API so we only
+        pay for the delta audio each tick. Falls back to re-transcribing the
+        full snapshot if the backend doesn't expose a streaming context.
+
         Emits `partial` events to the dashboard/HUD and caches the latest
         transcript so `_process` can skip the final ASR pass when the
         partial already covers ~all of the final audio (pre-flight ASR).
         """
+        if getattr(self.asr_speed, "supports_streaming", lambda: False)():
+            self._stream_partials_incremental()
+        else:
+            self._stream_partials_fullshot()
+
+    def _stream_partials_incremental(self) -> None:
+        """Feed the streaming ASR the newly arrived audio every tick.
+
+        This is O(delta) per tick instead of O(total), so a 30-second
+        utterance costs roughly 10× less partial-ASR work than the naive
+        re-transcribe loop.
+        """
+        import mlx.core as mx  # localize import — only on hot path
+
+        sr = self.cfg.audio.sample_rate
+        interval = max(0.05, self.cfg.asr.streaming_interval_ms / 1000.0)
+        min_samples = int(sr * self.cfg.asr.streaming_min_audio_ms / 1000.0)
+        try:
+            stream_ctx = self.asr_speed.open_stream()
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                console.print(f"[yellow]streaming asr unavailable: {e} — falling back[/]")
+            self._stream_partials_fullshot()
+            return
+
+        fed = 0  # samples already fed to the stream
+        try:
+            with stream_ctx as transcriber:
+                while not self._stream_stop.is_set():
+                    if self._stream_stop.wait(interval):
+                        break
+                    snap = self.audio.snapshot()
+                    if snap.size < min_samples:
+                        continue
+                    if snap.size <= fed:
+                        continue
+                    delta = snap[fed:]
+                    try:
+                        transcriber.add_audio(mx.array(delta))
+                    except Exception as e:  # noqa: BLE001
+                        if self.verbose:
+                            console.print(f"[yellow]partial feed failed: {e}[/]")
+                        continue
+                    fed = int(snap.size)
+                    text = (transcriber.result.text or "").strip()
+                    with self._stream_lock:
+                        self._last_partial_text = text
+                        self._last_partial_samples = fed
+                    stream.emit({"type": "partial", "text": text})
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                console.print(f"[yellow]streaming loop crashed: {e}[/]")
+
+    def _stream_partials_fullshot(self) -> None:
+        """Fallback: re-transcribe the full buffer each tick. Used when the
+        ASR backend doesn't expose streaming (e.g. Whisper, Qwen3-ASR)."""
         sr = self.cfg.audio.sample_rate
         interval = max(0.05, self.cfg.asr.streaming_interval_ms / 1000.0)
         min_samples = int(sr * self.cfg.asr.streaming_min_audio_ms / 1000.0)

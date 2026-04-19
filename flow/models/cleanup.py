@@ -116,6 +116,10 @@ class CleanupLLM:
             self._prefix_messages(), tokenize=False, add_generation_prompt=False
         )
         prefix_ids = self.tokenizer.encode(prefix_str)
+        # Keep the raw token ids around so per-call prefix-check is an O(N)
+        # list-slice comparison instead of re-running apply_chat_template +
+        # re-encoding (which itself took ~1-2ms on every call).
+        self._cached_prefix_ids: list[int] = list(prefix_ids)
         self._prefix_token_count = len(prefix_ids)
 
         cache = make_prompt_cache(self.model)
@@ -161,6 +165,14 @@ class CleanupLLM:
         few_shots: list[FewShotExample] | None = None,
         style_instruction: str | None = None,
     ) -> str:
+        # Fast path: for ultra-short utterances the LLM adds latency without
+        # meaningfully improving text quality (capitalization + a period is
+        # the whole job). Skip cleanup entirely and return a minimally-
+        # capitalized version. Dictionary replacements still run downstream.
+        stripped = raw_transcript.strip()
+        if stripped and len(stripped.split()) <= self.cfg.passthrough_word_count:
+            return self._lightweight_format(stripped)
+
         messages = self._build_messages(
             raw_transcript=raw_transcript,
             alt_hypotheses=alt_hypotheses or [],
@@ -173,6 +185,23 @@ class CleanupLLM:
         if self._hallucinated(raw_transcript, cleaned):
             return raw_transcript
         return cleaned
+
+    def _lightweight_format(self, text: str) -> str:
+        """Capitalize the first letter and add a trailing period if the text
+        looks like a sentence fragment. Used for the ultra-short passthrough
+        path so single-word commands like "hello" still come out as "Hello."
+        without eating ~50ms of LLM time.
+        """
+        if not text:
+            return text
+        first = text[0]
+        if first.isalpha() and first.islower():
+            text = first.upper() + text[1:]
+        # Only add a period if the user didn't already end with punctuation —
+        # and skip for obvious single-token commands like URLs or emails.
+        if text[-1].isalnum() and not any(c in text for c in ("@", "://", "#")):
+            text += "."
+        return text
 
     # --------------------------------------------------------------
 
@@ -223,19 +252,18 @@ class CleanupLLM:
         # the model. The cache already contains KV for the static prefix.
         cache = None
         prompt_ids = full_ids
-        if self._prefix_cache_snapshot is not None and len(full_ids) > self._prefix_token_count:
-            # Verify the prefix actually matches what we cached. If it doesn't
-            # (e.g. tokenizer changed something), fall back to the full prompt.
-            prefix_check = self.tokenizer.apply_chat_template(
-                self._prefix_messages(), tokenize=False, add_generation_prompt=False
-            )
-            cached_ids = self.tokenizer.encode(prefix_check)
-            if full_ids[: len(cached_ids)] == cached_ids:
-                cache = _pycopy.deepcopy(self._prefix_cache_snapshot)
-                # Skip prefix tokens — but keep the 1 extra token we generated
-                # during prefill (it represents the "next" token after the prefix
-                # so the cache state corresponds to position prefix_token_count).
-                prompt_ids = full_ids[self._prefix_token_count - 1 :]
+        cached_ids = getattr(self, "_cached_prefix_ids", None)
+        if (
+            self._prefix_cache_snapshot is not None
+            and cached_ids is not None
+            and len(full_ids) > self._prefix_token_count
+            and full_ids[: len(cached_ids)] == cached_ids
+        ):
+            cache = _pycopy.deepcopy(self._prefix_cache_snapshot)
+            # Skip prefix tokens — but keep the 1 extra token we generated
+            # during prefill (it represents the "next" token after the prefix
+            # so the cache state corresponds to position prefix_token_count).
+            prompt_ids = full_ids[self._prefix_token_count - 1 :]
 
         out_pieces: list[str] = []
         for resp in stream_generate(

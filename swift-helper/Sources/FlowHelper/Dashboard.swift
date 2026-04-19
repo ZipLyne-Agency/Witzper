@@ -260,7 +260,7 @@ struct DashboardView: View {
             Text("WITZPER")
                 .font(.system(size: 16, weight: .black, design: .monospaced))
                 .foregroundColor(.bbAmber)
-            Text("v0.1.0")
+            Text("v\(appVersion())")
                 .font(.bbSmall)
                 .foregroundColor(.bbDim)
             Spacer()
@@ -277,6 +277,17 @@ struct DashboardView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Color.bbBlack)
+    }
+
+    private func appVersion() -> String {
+        // Prefer CFBundleShortVersionString so a build from `swift build`
+        // (no bundle) falls back gracefully to "dev". Avoids the bug where
+        // the dashboard lied "v0.1.0" while the user was running 0.4.x.
+        if let s = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           !s.isEmpty {
+            return s
+        }
+        return "dev"
     }
 
     private func label(_ key: String, _ value: String, _ color: Color) -> some View {
@@ -326,14 +337,27 @@ struct DashboardView: View {
 
     private var centerPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("LIVE TRANSCRIPT FEED")
+            HStack {
+                sectionHeader("LIVE TRANSCRIPT FEED")
+                Spacer()
+                if !state.entries.isEmpty {
+                    Button(action: exportTranscripts) {
+                        Text("EXPORT")
+                            .font(.bbSmall)
+                            .foregroundColor(.bbDim)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .overlay(RoundedRectangle(cornerRadius: 2)
+                                .stroke(Color.bbBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 14).padding(.top, 6)
+                    .help("Save every transcript in this session to a .txt file")
+                }
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if state.entries.isEmpty {
-                        Text("waiting for utterance — hold your hotkey to dictate")
-                            .font(.bbBody)
-                            .foregroundColor(.bbDim)
-                            .padding(20)
+                        emptyFeedHint
                     }
                     ForEach(state.entries) { entry in
                         transcriptCard(entry)
@@ -345,6 +369,48 @@ struct DashboardView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var emptyFeedHint: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 28))
+                    .foregroundColor(.bbAmber)
+                Text("NO DICTATIONS YET")
+                    .font(.bbHeader).foregroundColor(.bbAmber)
+            }
+            Text("Hold **\(state.hotkeyLabel)**, speak clearly, then release. The transcript will appear here.")
+                .font(.bbBody).foregroundColor(.bbDim)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Tip — the text is pasted directly into whichever app has focus. Try it in Messages, Slack, a code editor, or a form field.")
+                .font(.bbSmall).foregroundColor(.bbDim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.bbBorder, lineWidth: 1))
+        .padding(.top, 4)
+    }
+
+    private func exportTranscripts() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd-HHmm"
+        panel.nameFieldStringValue = "witzper-session-\(fmt.string(from: Date())).txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let stamp = DateFormatter()
+        stamp.dateStyle = .short
+        stamp.timeStyle = .medium
+        var lines: [String] = ["# Witzper — session transcripts", ""]
+        for e in state.entries.reversed() {
+            lines.append("[\(stamp.string(from: e.timestamp))]")
+            if !e.app.isEmpty { lines.append("  app: \(e.app)") }
+            lines.append("  " + e.cleaned)
+            lines.append("")
+        }
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func transcriptCard(_ entry: DashboardState.TranscriptEntry) -> some View {

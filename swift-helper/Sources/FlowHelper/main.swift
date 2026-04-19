@@ -545,7 +545,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
 
-        let hotkeyItem = NSMenuItem(title: "Hotkey: \(hotkey.label)", action: nil, keyEquivalent: "")
+        // Read the *actual* dictate binding from config, not the legacy
+        // Hotkey enum, so a user who picked "f5" in settings sees "F5" in
+        // the menu instead of whatever enum ordinal we booted with.
+        let dictateLabel = HotkeyName.label(for: UserConfigWriter.read(section: "hotkeys.dictate", key: "key") ?? hotkey.rawValue)
+        let hotkeyItem = NSMenuItem(title: "Dictate: \(dictateLabel)", action: nil, keyEquivalent: "")
         hotkeyItem.isEnabled = false
         hotkeyItem.tag = 100
         menu.addItem(hotkeyItem)
@@ -747,15 +751,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return "{}"
         })
 
-        // Request Accessibility (non-blocking; user can click menu to open settings)
-        let trusted = AXIsProcessTrustedWithOptions(
-            [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-        )
+        // SILENT Accessibility check — we deliberately do NOT call
+        // AXIsProcessTrustedWithOptions(prompt: true) on every launch
+        // anymore. That was the source of the "permission dialog pops up
+        // at random times" complaint: any code path that probed the AX
+        // trust state with prompt=true would show the macOS dialog if
+        // TCC hadn't recorded a decision yet. We now only show the prompt
+        // when the user clicks "Open Accessibility Settings" in the
+        // onboarding flow — an explicit, expected action.
+        let trusted = AXIsProcessTrusted()
         if !trusted {
             FileHandle.standardError.write(
-                "Witzper: Accessibility not granted. Click the menu bar icon → Open Accessibility Settings.\n".data(using: .utf8)!
+                "Witzper: Accessibility not granted. Menu bar → Open Accessibility Settings.\n".data(using: .utf8)!
             )
             updateIconNotTrusted()
+        }
+
+        // Keep the menu bar icon's warning state in sync with the live
+        // permission status so users see it clear the moment they grant
+        // access in System Settings.
+        PermissionWatcher.shared.onAccessibilityGranted = { [weak self] in
+            guard let self = self else { return }
+            if !self.isListening { self.updateIcon(listening: false) }
         }
 
         // Start hotkey tap with all configured bindings.
@@ -858,13 +875,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func updateIcon(listening: Bool, action: String = "dictate") {
         isListening = listening
-        if let button = statusItem.button {
-            let glyph = action == "command" ? "🟣" : "🔴"
-            button.title = listening ? "\(glyph) Witzper" : "⚪ Witzper"
-            button.toolTip = listening
-                ? (action == "command" ? "Command Mode…" : "Listening…")
-                : "Witzper ready"
+        guard let button = statusItem.button else { return }
+
+        // If accessibility isn't granted, the warning takes priority over
+        // everything else — the hotkey can't work without it, so the menu
+        // bar should reflect that first.
+        if !AXIsProcessTrusted() {
+            updateIconNotTrusted()
+            return
         }
+
+        // SF Symbols (template images) render correctly in light + dark
+        // menu bars and scale with the user's menu bar size setting —
+        // they look native in a way an emoji never can.
+        let tooltip: String
+        if listening {
+            tooltip = action == "command" ? "Command Mode — listening…" : "Listening…"
+        } else {
+            tooltip = "Witzper — ready (hold your hotkey to dictate)"
+        }
+
+        // Stop any previous pulse before we swap images.
+        stopIconPulse()
+
+        if listening {
+            // A subtle "pulse" between two SF Symbols gives the menu bar the
+            // same feedback as the voice-memos app — instantly obvious that
+            // something is being captured without being visually loud.
+            startIconPulse(action: action)
+        } else {
+            if let img = NSImage(systemSymbolName: "mic", accessibilityDescription: tooltip) {
+                img.isTemplate = true
+                button.image = img
+                button.title = ""
+            } else {
+                button.image = nil
+                button.title = "○ Witzper"
+            }
+        }
+        button.toolTip = tooltip
+
         if listening {
             HUD.shared.show()
         } else {
@@ -873,9 +923,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateIconNotTrusted() {
-        if let button = statusItem.button {
+        stopIconPulse()
+        guard let button = statusItem.button else { return }
+        if let img = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: "Witzper: grant Accessibility permission"
+        ) {
+            img.isTemplate = true
+            button.image = img
+            button.title = ""
+        } else {
+            button.image = nil
             button.title = "⚠ Witzper"
-            button.toolTip = "Witzper: grant Accessibility permission"
+        }
+        button.toolTip = "Witzper: Accessibility permission required — click for setup"
+    }
+
+    // MARK: - Menu bar pulse animation
+
+    private var iconPulseTimer: Timer?
+    private var iconPulsePhase: Bool = false
+
+    private func startIconPulse(action: String) {
+        // Two symbols we toggle between. `waveform` is the "resting" frame
+        // and `waveform.badge.mic.fill` is the "peak" frame; for command
+        // mode we use wand.and.stars ↔ sparkles so the distinction between
+        // dictate and command is visible at a glance.
+        let frames: (String, String) = action == "command"
+            ? ("wand.and.stars", "sparkles")
+            : ("waveform", "waveform.circle.fill")
+
+        // Immediately set the first frame so there's no 400ms gap between
+        // the hotkey press and the visual feedback.
+        setPulseImage(frames.0)
+
+        iconPulseTimer?.invalidate()
+        iconPulseTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.iconPulsePhase.toggle()
+            self.setPulseImage(self.iconPulsePhase ? frames.1 : frames.0)
+        }
+    }
+
+    private func stopIconPulse() {
+        iconPulseTimer?.invalidate()
+        iconPulseTimer = nil
+        iconPulsePhase = false
+    }
+
+    private func setPulseImage(_ symbolName: String) {
+        guard let button = statusItem.button else { return }
+        if let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Witzper") {
+            img.isTemplate = true
+            button.image = img
+            button.title = ""
+        } else {
+            button.image = nil
+            button.title = "● Witzper"
         }
     }
 

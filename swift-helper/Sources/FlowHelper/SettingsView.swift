@@ -78,10 +78,10 @@ struct SettingsView: View {
                 )
 
                 settingsSectionHeader("SHORTCUTS")
-                VStack(alignment: .leading, spacing: 8) {
-                    shortcutRow(action: "dictate", label: "DICTATE")
-                    shortcutRow(action: "command", label: "COMMAND MODE")
-                    Text("CHANGES TAKE EFFECT AFTER RESTART DAEMON BELOW")
+                VStack(alignment: .leading, spacing: 10) {
+                    shortcutCaptureRow(action: "dictate", label: "DICTATE")
+                    shortcutCaptureRow(action: "command", label: "COMMAND MODE")
+                    Text("CLICK THE PILL THEN PRESS YOUR KEY · CHANGES TAKE EFFECT AFTER RESTART DAEMON BELOW")
                         .font(.bbSmall).foregroundColor(.bbDim)
                         .padding(.top, 4)
                 }
@@ -134,14 +134,23 @@ struct SettingsView: View {
         }
     }
 
-    private func shortcutRow(action: String, label: String) -> some View {
-        let current = shortcuts[action] ?? ""
-        let displayLabel = SettingsView.shortcutChoices
-            .first(where: { $0.0 == current })?.1 ?? current
+    private func shortcutCaptureRow(action: String, label: String) -> some View {
+        let binding = Binding<String>(
+            get: { shortcuts[action] ?? "" },
+            set: { shortcuts[action] = $0 }
+        )
         return HStack {
             Text(label)
                 .font(.bbSmall).foregroundColor(.bbDim)
                 .frame(width: 130, alignment: .leading)
+            HotkeyCaptureField(rawValue: binding) { captured in
+                writeShortcut(action: action, key: captured)
+            }
+            Spacer()
+            // Advanced: keep the old preset menu as a "pick from list"
+            // escape hatch for keys that are hard to capture (or for
+            // users on a remote desktop where NSEvent capture is
+            // sandboxed).
             Menu {
                 ForEach(SettingsView.shortcutChoices, id: \.0) { choice in
                     Button(choice.1) {
@@ -150,15 +159,10 @@ struct SettingsView: View {
                     }
                 }
             } label: {
-                Text(displayLabel.isEmpty ? "— disabled —" : displayLabel)
-                    .font(.bbBody).foregroundColor(.bbCyan)
-                    .lineLimit(1).truncationMode(.middle)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.bbCyan, lineWidth: 1))
+                Text("PRESETS ▾").font(.bbSmall).foregroundColor(.bbDim)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            Spacer()
         }
     }
 
