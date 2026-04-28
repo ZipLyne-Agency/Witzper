@@ -106,8 +106,9 @@ class CleanupLLM:
         """Pre-fill a KV cache with the static prefix so per-call prefill only
         processes the new (small) suffix."""
         try:
+            from importlib import import_module
+
             import mlx.core as mx
-            from mlx_lm import stream_generate
             from mlx_lm.models.cache import make_prompt_cache
         except ImportError:
             return
@@ -124,17 +125,18 @@ class CleanupLLM:
 
         cache = make_prompt_cache(self.model)
         t0 = time.perf_counter()
-        # Run a 1-token generation to fully prefill the cache for the prefix.
-        for _ in stream_generate(
+        # Prefill the cache with the exact static prefix tokens and generate
+        # zero new tokens. Using stream_generate(max_tokens=1) here corrupts
+        # the reusable cache with a sampled token that is not part of later
+        # prompts, which can make cleanup drift or hallucinate.
+        generate_step = import_module("mlx_lm.generate").generate_step
+        for _ in generate_step(
+            mx.array(prefix_ids),
             self.model,
-            self.tokenizer,
-            prompt=mx.array(prefix_ids),
-            max_tokens=1,
+            max_tokens=0,
             prompt_cache=cache,
         ):
             pass
-        # The 1 generated token is now in the cache too — account for it.
-        self._prefix_token_count += 1
         self._prefix_cache_snapshot = _pycopy.deepcopy(cache)
         _console.print(
             f"[dim]cleanup: prefix cache built ({len(prefix_ids)} tokens) in "
@@ -260,10 +262,7 @@ class CleanupLLM:
             and full_ids[: len(cached_ids)] == cached_ids
         ):
             cache = _pycopy.deepcopy(self._prefix_cache_snapshot)
-            # Skip prefix tokens — but keep the 1 extra token we generated
-            # during prefill (it represents the "next" token after the prefix
-            # so the cache state corresponds to position prefix_token_count).
-            prompt_ids = full_ids[self._prefix_token_count - 1 :]
+            prompt_ids = full_ids[self._prefix_token_count :]
 
         out_pieces: list[str] = []
         for resp in stream_generate(

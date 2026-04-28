@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 from collections.abc import Callable
 from pathlib import Path
 
@@ -65,6 +66,14 @@ class HotkeyRouter:
             if SOCKET_PATH.exists():
                 try:
                     await self._run_swift_socket()
+                except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
+                    if _is_stale_socket(SOCKET_PATH):
+                        print(f"[flow] stale hotkey socket at {SOCKET_PATH}: {e}")
+                        SOCKET_PATH.unlink(missing_ok=True)
+                        print("[flow] using pynput fallback")
+                        await self._run_pynput_fallback()
+                        return
+                    print(f"[flow] hotkey socket error: {e} — reconnecting in 2s")
                 except Exception as e:  # noqa: BLE001
                     print(f"[flow] hotkey socket error: {e} — reconnecting in 2s")
                 await asyncio.sleep(2)
@@ -128,3 +137,18 @@ class HotkeyRouter:
 
 # Back-compat alias for any external callers still importing the old name.
 HotkeyListener = HotkeyRouter
+
+
+def _is_stale_socket(path: Path) -> bool:
+    """Return True when a Unix socket path exists but no server accepts it."""
+    if not path.exists():
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            s.connect(str(path))
+        return False
+    except (ConnectionRefusedError, FileNotFoundError):
+        return True
+    except OSError:
+        return True

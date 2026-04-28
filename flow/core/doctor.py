@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import socket
 from pathlib import Path
 
 from rich.console import Console
@@ -10,6 +12,7 @@ from rich.table import Table
 
 from flow.config import load_config
 from flow.core.hotkey import SOCKET_PATH
+from flow.insert.inserter import CONTEXT_SOCKET
 
 console = Console()
 
@@ -25,26 +28,92 @@ def _check(label: str, ok: bool, detail: str = "") -> tuple[str, str, str]:
     return (mark, label, detail)
 
 
+def _pid_alive(pid_path: Path = Path("/tmp/Witzper.pid")) -> tuple[bool, str]:
+    if not pid_path.exists():
+        return False, "pid file missing"
+    try:
+        pid = int(pid_path.read_text().strip())
+    except Exception:
+        return False, "pid file unreadable"
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False, f"stale pid file ({pid})"
+    except PermissionError:
+        return True, f"pid {pid} exists, permission denied"
+    return True, f"pid {pid}"
+
+
+def _socket_accepts(path: Path) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "missing"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            s.connect(str(path))
+        return True, str(path)
+    except Exception as e:  # noqa: BLE001
+        return False, f"{path} exists but is not accepting connections: {e}"
+
+
 def run_doctor() -> None:
     cfg = load_config()
     rows: list[tuple[str, str, str]] = []
 
+    # Daemon pid
+    ok, detail = _pid_alive()
+    rows.append(_check("Python daemon pid", ok, detail))
+
     # Swift helper socket
+    ok, detail = _socket_accepts(SOCKET_PATH)
     rows.append(
         _check(
             "Swift helper socket",
-            SOCKET_PATH.exists(),
-            str(SOCKET_PATH) if SOCKET_PATH.exists() else "not running (pynput fallback will be used)",
+            ok,
+            detail if ok else f"{detail} (hotkey events will not arrive)",
+        )
+    )
+
+    # AX/insertion context socket
+    ok, detail = _socket_accepts(CONTEXT_SOCKET)
+    rows.append(
+        _check(
+            "Insertion/context socket",
+            ok,
+            detail if ok else f"{detail} (text insertion will fail)",
         )
     )
 
     # Audio
     try:
         import sounddevice as sd
-        _ = sd.query_devices(kind="input")
-        rows.append(_check("Microphone access", True))
+        configured = cfg.audio.device or "default"
+        if configured.lower() in ("", "default", "system default"):
+            device = sd.query_devices(kind="input")
+            detail = f"default: {device.get('name', 'unknown')}"
+        else:
+            matches = [
+                (i, dev)
+                for i, dev in enumerate(sd.query_devices())
+                if dev.get("max_input_channels", 0) > 0
+                and (
+                    dev.get("name") == configured
+                    or configured.lower() in dev.get("name", "").lower()
+                )
+            ]
+            if not matches:
+                raise RuntimeError(f"{configured!r} not found")
+            idx, dev = matches[0]
+            sd.check_input_settings(
+                device=idx,
+                samplerate=cfg.audio.sample_rate,
+                channels=cfg.audio.channels,
+                dtype="float32",
+            )
+            detail = f"{dev.get('name')} (device {idx})"
+        rows.append(_check("Configured microphone", True, detail))
     except Exception as e:
-        rows.append(_check("Microphone access", False, str(e)))
+        rows.append(_check("Configured microphone", False, str(e)))
 
     # MLX
     try:

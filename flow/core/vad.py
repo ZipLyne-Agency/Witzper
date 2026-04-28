@@ -18,10 +18,10 @@ from flow.config import VadCfg
 # Keep this much audio after the last detected speech sample. Stop consonants
 # (/t/, /k/, /p/) and final fricatives have low energy that VAD often marks
 # as silence — trimming to the exact boundary clips them and hurts ASR on the
-# last word. 150 ms is below perceptual latency and well inside the ASR's
-# tolerance for trailing silence.
-_TRAIL_PAD_MS = 150
-_LEAD_PAD_MS = 60
+# last word. 250 ms is still inside the ASR's tolerance for trailing silence
+# and is safer for quiet final consonants.
+_TRAIL_PAD_MS = 250
+_LEAD_PAD_MS = 100
 
 
 class VADBackend(Protocol):
@@ -36,7 +36,8 @@ class SileroVAD:
     runtime. onnxruntime adds ~15 MB vs torch's ~900 MB.
     """
 
-    def __init__(self):
+    def __init__(self, cfg: VadCfg):
+        self._endpoint_silence_ms = max(100, int(cfg.endpoint_silence_ms))
         try:
             from silero_vad import get_speech_timestamps, load_silero_vad
         except ImportError as e:
@@ -52,7 +53,13 @@ class SileroVAD:
             return audio
         # The ONNX path accepts a numpy float32 array directly.
         wav = np.ascontiguousarray(audio, dtype=np.float32)
-        ts = self._get_speech_timestamps(wav, self._model, sampling_rate=sr)
+        ts = self._get_speech_timestamps(
+            wav,
+            self._model,
+            sampling_rate=sr,
+            min_silence_duration_ms=self._endpoint_silence_ms,
+            speech_pad_ms=0,
+        )
         if not ts:
             return audio  # fall through; let ASR handle silence
         start = max(0, ts[0]["start"] - int(sr * _LEAD_PAD_MS / 1000))
@@ -93,5 +100,5 @@ class PyannoteVAD:
 
 def make_vad(cfg: VadCfg) -> VADBackend:
     if cfg.backend == "silero":
-        return SileroVAD()
+        return SileroVAD(cfg)
     return PyannoteVAD(cfg.model)

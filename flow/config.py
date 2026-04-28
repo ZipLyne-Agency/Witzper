@@ -38,12 +38,15 @@ class AudioCfg(BaseModel):
     channels: int = 1
     device: str = "default"
     max_seconds: int = 300
+    # Keep a tiny in-memory rolling buffer before the hotkey goes down. This
+    # covers the human habit of starting to talk at the same instant as the
+    # press, plus any CoreAudio/event-tap scheduling jitter.
+    preroll_ms: int = 300
     # Keep recording for this many ms AFTER the user releases the hotkey.
-    # CoreAudio delivers in ~30 ms blocks and humans release the key at the
-    # exact instant they finish speaking — without this pad, the last word's
-    # tail gets chopped. 250 ms is imperceptible to the user but captures the
-    # final fricatives / stop releases reliably.
-    trailing_ms: int = 250
+    # CoreAudio delivers in ~30 ms blocks and humans often release the key
+    # slightly before their final word has fully decayed. 650 ms is still
+    # short enough to feel immediate, while reliably preserving word endings.
+    trailing_ms: int = 650
 
 
 class VadCfg(BaseModel):
@@ -71,7 +74,11 @@ class AsrCfg(BaseModel):
     streaming: bool = True
     streaming_interval_ms: int = 200
     streaming_min_audio_ms: int = 250
-    streaming_reuse_ratio: float = 0.95
+    streaming_reuse_ratio: float = 0.98
+    # Even when the ratio passes on long dictations, require the partial ASR
+    # to have seen almost the whole recording. Otherwise a post-release tail
+    # can contain the user's final words while an older partial is reused.
+    streaming_max_untranscribed_ms: int = 250
 
 
 class CleanupCfg(BaseModel):

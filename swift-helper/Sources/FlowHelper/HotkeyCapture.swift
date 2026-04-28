@@ -34,6 +34,12 @@ enum HotkeyName {
             // high) as a valid trigger.
             if mods.contains(.capsLock) { return "caps_lock" }
             if mods.contains(.function) { return "fn" }
+            var chordParts: [String] = []
+            if mods.contains(.command) { chordParts.append("right_cmd") }
+            if mods.contains(.option) { chordParts.append("right_option") }
+            if mods.contains(.shift) { chordParts.append("right_shift") }
+            if mods.contains(.control) { chordParts.append("right_control") }
+            if chordParts.count >= 2 { return chordParts.joined(separator: "+") }
             // Left vs right — NSEvent exposes the keyCode of the changed
             // modifier; we use that to disambiguate left/right.
             switch Int(event.keyCode) {
@@ -47,13 +53,6 @@ enum HotkeyName {
             case 62: return "right_control"
             default: break
             }
-            // If they held multiple modifiers and released one, synthesize
-            // a chord — e.g. Right ⌘ + Right ⌥.
-            var parts: [String] = []
-            if mods.contains(.command) { parts.append("right_cmd") }
-            if mods.contains(.option) { parts.append("right_option") }
-            if mods.contains(.shift) { parts.append("right_shift") }
-            if parts.count >= 2 { return parts.joined(separator: "+") }
             return nil
         }
 

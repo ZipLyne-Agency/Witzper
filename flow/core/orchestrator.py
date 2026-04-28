@@ -123,7 +123,14 @@ class Orchestrator:
         if mode == "accuracy":
             if self.asr_accuracy is None:
                 console.print("[dim]lazy-loading Qwen3-ASR...[/]")
-                self.asr_accuracy = Qwen3ASR(self.cfg.asr.accuracy.model)
+                try:
+                    self.asr_accuracy = Qwen3ASR(self.cfg.asr.accuracy.model)
+                except Exception as e:  # noqa: BLE001
+                    console.print(
+                        "[yellow]accuracy ASR unavailable; falling back to speed "
+                        f"ASR: {e}[/]"
+                    )
+                    return self.asr_speed
             return self.asr_accuracy
         return self.asr_speed
 
@@ -146,6 +153,8 @@ class Orchestrator:
     # ---- Hotkey callbacks -------------------------------------------------
 
     def on_down(self) -> None:
+        if self._recording_active:
+            return
         if self.verbose:
             console.print("[cyan]⏺ recording[/]")
         self._recording_active = True
@@ -172,11 +181,11 @@ class Orchestrator:
         self._recording_active = False
         if self.verbose:
             console.print("[cyan]⏹ processing[/]")
-        # Signal the streaming loop to stop, then drain the trailing audio
-        # window. audio.stop() sleeps cfg.trailing_ms before snapshotting,
-        # which gives the partial thread time to wind down in parallel.
-        self._stream_stop.set()
+        # Drain the post-release tail before stopping streaming partials.
+        # If we stop the streaming loop first, the last partial can lag behind
+        # the final audio and miss words spoken right as the key is released.
         audio = self.audio.stop()
+        self._stream_stop.set()
         stream.emit({"type": "recording", "state": "stop"})
         if self._stream_thread is not None:
             # The streaming loop checks _stream_stop every interval (~200ms).
@@ -190,6 +199,18 @@ class Orchestrator:
         # recordings (partial covers >99% of audio) and runs a fast fresh
         # ASR for short ones. This eliminates 80-500ms of event-loop blocking.
         self._utterance_task = asyncio.create_task(self._process(audio))
+        self._utterance_task.add_done_callback(self._log_utterance_failure)
+
+    @staticmethod
+    def _log_utterance_failure(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            console.print(f"[red]utterance pipeline failed: {exc}[/]")
 
     # ---- Streaming partial ASR loop --------------------------------------
 
@@ -314,10 +335,16 @@ class Orchestrator:
                 # size — that's what the partial was transcribed from. Using
                 # trimmed.size here was apples-to-oranges and could silently
                 # drop tail words when VAD shrank the final buffer.
+                max_untranscribed_samples = int(
+                    self.cfg.audio.sample_rate
+                    * self.cfg.asr.streaming_max_untranscribed_ms
+                    / 1000.0
+                )
                 if (
                     partial_text
                     and partial_samples
                     >= int(audio.size * self.cfg.asr.streaming_reuse_ratio)
+                    and audio.size - partial_samples <= max_untranscribed_samples
                 ):
                     raw = ASRResult(text=partial_text, alternatives=[], language=None)
                     if self.verbose:
@@ -332,6 +359,7 @@ class Orchestrator:
             t_asr = time.perf_counter()
 
             if not raw.text.strip():
+                self.audio.cleanup_recovery()
                 return
 
             # 4. LLM cleanup with dynamic few-shots + per-app style instruction

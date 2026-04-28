@@ -45,17 +45,38 @@ class AudioCapture:
         # Crash-recovery: periodic WAV flush while recording.
         self._recovery_path: Path | None = None
         self._flush_timer: threading.Timer | None = None
+        # Short in-memory pre-roll captured while idle. This never touches
+        # disk and is cleared as it ages out; it exists only to prevent the
+        # first syllable from being clipped when the user speaks exactly as
+        # they press the hotkey.
+        self._preroll_frames: list[np.ndarray] = []
+        self._preroll_samples = 0
         # Open the input stream once now so macOS prompts for mic permission
         # immediately on daemon startup rather than on first hotkey press.
         self._warmup()
+        # Keep the stream hot after startup. The callback only stores a tiny
+        # pre-roll while idle, but avoiding a CoreAudio start on key-down is
+        # what makes capture begin immediately.
+        try:
+            self._ensure_stream()
+        except Exception as e:  # noqa: BLE001
+            print(f"[flow] mic stream startup failed: {e}")
 
     def _warmup(self) -> None:
         try:
+            device = self._resolve_device()
+            sd.check_input_settings(
+                device=device,
+                samplerate=self.cfg.sample_rate,
+                channels=self.cfg.channels,
+                dtype="float32",
+            )
             warmup = sd.InputStream(
                 samplerate=self.cfg.sample_rate,
                 channels=self.cfg.channels,
                 dtype="float32",
                 blocksize=int(self.cfg.sample_rate * 0.03),
+                device=device,
             )
             warmup.start()
             warmup.stop()
@@ -67,13 +88,27 @@ class AudioCapture:
         if status:
             # Under-run / over-run; ignore for now, log in verbose mode.
             pass
+        block = indata.copy()
         if self._recording.is_set():
-            self._q.put(indata.copy())
+            self._q.put(block)
+        else:
+            self._remember_preroll(block)
+
+    def _remember_preroll(self, block: np.ndarray) -> None:
+        max_samples = int(self.cfg.sample_rate * max(0, self.cfg.preroll_ms) / 1000.0)
+        if max_samples <= 0:
+            return
+        with self._frames_lock:
+            self._preroll_frames.append(block)
+            self._preroll_samples += int(block.shape[0])
+            while self._preroll_samples > max_samples and self._preroll_frames:
+                old = self._preroll_frames.pop(0)
+                self._preroll_samples -= int(old.shape[0])
 
     def _resolve_device(self):
         """Map cfg.audio.device (string name or 'default') to a sounddevice index."""
         name = (self.cfg.device or "default").strip()
-        if name == "default" or name == "":
+        if name.lower() in ("default", "system default", ""):
             return None
         # Try exact match against available input devices
         for i, dev in enumerate(sd.query_devices()):
@@ -87,6 +122,26 @@ class AudioCapture:
         print(f"[flow] mic '{name}' not found — using system default")
         return None
 
+    def _ensure_stream(self) -> None:
+        if self._stream is not None:
+            return
+        device = self._resolve_device()
+        sd.check_input_settings(
+            device=device,
+            samplerate=self.cfg.sample_rate,
+            channels=self.cfg.channels,
+            dtype="float32",
+        )
+        self._stream = sd.InputStream(
+            samplerate=self.cfg.sample_rate,
+            channels=self.cfg.channels,
+            dtype="float32",
+            callback=self._callback,
+            blocksize=int(self.cfg.sample_rate * 0.03),  # 30 ms blocks
+            device=device,
+        )
+        self._stream.start()
+
     def set_on_max_reached(self, callback: callable) -> None:
         """Register a callback invoked (from a timer thread) when max_seconds
         is reached. The orchestrator uses this to trigger the same pipeline
@@ -94,22 +149,16 @@ class AudioCapture:
         self._on_max_reached = callback
 
     def start(self) -> None:
-        self._frames.clear()
-        self._concat_cache = np.zeros(0, dtype=np.float32)
-        self._concat_frames_count = 0
+        self._ensure_stream()
+        with self._frames_lock:
+            self._frames.clear()
+            if self._preroll_frames:
+                self._frames.extend(frame.copy() for frame in self._preroll_frames)
+            self._concat_cache = np.zeros(0, dtype=np.float32)
+            self._concat_frames_count = 0
         while not self._q.empty():
             self._q.get_nowait()
         self._recording.set()
-        if self._stream is None:
-            self._stream = sd.InputStream(
-                samplerate=self.cfg.sample_rate,
-                channels=self.cfg.channels,
-                dtype="float32",
-                callback=self._callback,
-                blocksize=int(self.cfg.sample_rate * 0.03),  # 30 ms blocks
-                device=self._resolve_device(),
-            )
-            self._stream.start()
         # Enforce max_seconds: auto-stop after the configured limit so the
         # user never silently loses audio by recording past the cap.
         max_s = self.cfg.max_seconds

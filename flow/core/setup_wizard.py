@@ -56,18 +56,31 @@ def write_user_config(hotkey: str) -> Path:
             existing = tomli.load(f)
     existing.setdefault("hotkey", {})["key"] = hotkey
     existing["hotkey"]["toggle_mode"] = False
+    existing.setdefault("hotkeys", {})
+    existing["hotkeys"]["dictate"] = {"key": hotkey, "mode": "hold"}
+
+    def fmt_value(v) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+        return '"' + str(v).replace('"', '\\"') + '"'
+
+    def emit_section(prefix: str, data: dict, lines: list[str]) -> None:
+        scalars = {k: v for k, v in data.items() if not isinstance(v, dict)}
+        nested = {k: v for k, v in data.items() if isinstance(v, dict)}
+        if scalars:
+            lines.append(f"[{prefix}]")
+            for k, v in scalars.items():
+                lines.append(f"{k} = {fmt_value(v)}")
+            lines.append("")
+        for k, v in nested.items():
+            emit_section(f"{prefix}.{k}", v, lines)
 
     lines = ["# Witzper user config (overrides configs/default.toml)", ""]
     for section, kv in existing.items():
-        lines.append(f"[{section}]")
-        for k, v in kv.items():
-            if isinstance(v, bool):
-                lines.append(f"{k} = {'true' if v else 'false'}")
-            elif isinstance(v, (int, float)):
-                lines.append(f"{k} = {v}")
-            else:
-                lines.append(f'{k} = "{v}"')
-        lines.append("")
+        if isinstance(kv, dict):
+            emit_section(section, kv, lines)
     USER_CONFIG_PATH.write_text("\n".join(lines))
     return USER_CONFIG_PATH
 

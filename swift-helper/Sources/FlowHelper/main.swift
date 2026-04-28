@@ -30,10 +30,11 @@ enum Hotkey: String, CaseIterable {
     /// CGEventFlags bit that goes high while this key is held.
     var flag: CGEventFlags {
         switch self {
-        case .rightOption, .fn: return .maskAlternate
+        case .rightOption: return .maskAlternate
         case .rightCmd: return .maskCommand
         case .rightShift: return .maskShift
         case .capsLock: return .maskAlphaShift
+        case .fn: return .maskSecondaryFn
         }
     }
 
@@ -285,8 +286,22 @@ func parseHotkeyTrigger(_ name: String) -> HotkeyTrigger? {
     var result: CGEventFlags = []
     for token in trimmed.split(separator: "+") {
         let key = String(token).trimmingCharacters(in: .whitespaces)
-        guard let hk = Hotkey(rawValue: key) else { return nil }
-        result.insert(hk.flag)
+        switch key {
+        case "fn":
+            result.insert(.maskSecondaryFn)
+        case "right_option", "left_option", "option", "alt":
+            result.insert(.maskAlternate)
+        case "right_cmd", "left_cmd", "cmd", "command":
+            result.insert(.maskCommand)
+        case "right_shift", "left_shift", "shift":
+            result.insert(.maskShift)
+        case "right_control", "left_control", "control", "ctrl":
+            result.insert(.maskControl)
+        case "caps_lock":
+            result.insert(.maskAlphaShift)
+        default:
+            return nil
+        }
     }
     return result.isEmpty ? nil : .modifier(result)
 }
@@ -827,6 +842,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var retainedTap: HotkeyTap?
     var retainedListener: StreamListener?
 
+    func applicationWillTerminate(_ notification: Notification) {
+        unlink("/tmp/Witzper.sock")
+        unlink("/tmp/flow-context.sock")
+    }
+
     func installMainMenu() {
         let main = NSMenu()
 
@@ -992,13 +1012,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Change & Quit")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            // Write to user config
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let cfgDir = home.appendingPathComponent(".config/Witzper")
-            try? FileManager.default.createDirectory(at: cfgDir, withIntermediateDirectories: true)
-            let cfgPath = cfgDir.appendingPathComponent("config.toml")
-            let content = "# Witzper user config\n[hotkey]\nkey = \"\(hk.rawValue)\"\ntoggle_mode = false\n"
-            try? content.write(to: cfgPath, atomically: true, encoding: .utf8)
+            UserConfigWriter.set(section: "hotkeys.dictate", key: "key", value: hk.rawValue)
+            UserConfigWriter.set(section: "hotkeys.dictate", key: "mode", value: "hold")
+            // Keep the legacy section in sync for older run scripts/builds.
+            UserConfigWriter.set(section: "hotkey", key: "key", value: hk.rawValue)
+            UserConfigWriter.set(section: "hotkey", key: "toggle_mode", value: "false")
             NSApp.terminate(nil)
         }
     }
@@ -1253,10 +1271,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .notDetermined: mic = "⚠️ not requested yet"
         @unknown default: mic = "unknown"
         }
+        let activeHotkey = HotkeyName.label(
+            for: UserConfigWriter.read(section: "hotkeys.dictate", key: "key") ?? hotkey.rawValue
+        )
         alert.informativeText = """
             Accessibility (hotkey + AX context): \(trusted ? "✅ granted" : "❌ NOT GRANTED")
             Microphone: \(mic)
-            Hotkey: \(hotkey.label)
+            Hotkey: \(activeHotkey)
             Sockets: /tmp/Witzper.sock, /tmp/flow-context.sock
 
             If Accessibility is not granted, the hotkey will silently do nothing.

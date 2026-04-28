@@ -11,6 +11,10 @@ def test_default_config_loads() -> None:
     # power users via the Settings tab. See ModelCatalog.swift.
     assert "Qwen3-8B" in cfg.cleanup.model
     assert cfg.personalization.auto_add_to_dictionary is True
+    assert cfg.audio.preroll_ms == 300
+    assert cfg.audio.trailing_ms == 650
+    assert cfg.asr.streaming_reuse_ratio >= 0.98
+    assert cfg.asr.streaming_max_untranscribed_ms == 250
     # Hotkey registry back-compat: both default actions present.
     assert "dictate" in cfg.hotkeys
     assert "command" in cfg.hotkeys
