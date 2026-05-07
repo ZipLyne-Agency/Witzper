@@ -9,7 +9,7 @@ import time
 from rich.console import Console
 
 from flow.config import Config
-from flow.context.app_context import AppContextProvider
+from flow.context.app_context import AppContext, AppContextProvider
 from flow.context.dictionary import Dictionary
 from flow.context.few_shot import FewShotRetriever
 from flow.context.styles import StyleResolver
@@ -87,7 +87,7 @@ class Orchestrator:
         self._utterance_task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._recording_active = False
-        self._prefetched_app_ctx = None
+        self._prefetched_app_ctx: AppContext | None = None
 
         # Streaming / pre-flight ASR state
         self._stream_stop = threading.Event()
@@ -331,20 +331,10 @@ class Orchestrator:
                 with self._stream_lock:
                     partial_text = self._last_partial_text
                     partial_samples = self._last_partial_samples
-                # Compare partial coverage against the raw (pre-VAD) audio
-                # size — that's what the partial was transcribed from. Using
-                # trimmed.size here was apples-to-oranges and could silently
-                # drop tail words when VAD shrank the final buffer.
-                max_untranscribed_samples = int(
-                    self.cfg.audio.sample_rate
-                    * self.cfg.asr.streaming_max_untranscribed_ms
-                    / 1000.0
-                )
-                if (
-                    partial_text
-                    and partial_samples
-                    >= int(audio.size * self.cfg.asr.streaming_reuse_ratio)
-                    and audio.size - partial_samples <= max_untranscribed_samples
+                if self._should_reuse_partial(
+                    partial_text=partial_text,
+                    partial_samples=partial_samples,
+                    total_samples=int(audio.size),
                 ):
                     raw = ASRResult(text=partial_text, alternatives=[], language=None)
                     if self.verbose:
@@ -429,6 +419,29 @@ class Orchestrator:
             app_ctx=app_ctx,
             audio=trimmed,
             sample_rate=self.cfg.audio.sample_rate,
+        )
+
+    def _should_reuse_partial(
+        self,
+        *,
+        partial_text: str,
+        partial_samples: int,
+        total_samples: int,
+    ) -> bool:
+        if not partial_text or partial_samples <= 0 or total_samples <= 0:
+            return False
+        # Compare partial coverage against the raw (pre-VAD) audio size:
+        # that's what the partial was transcribed from. Using the VAD-trimmed
+        # size here can silently drop tail words when VAD shrinks the final
+        # buffer.
+        max_untranscribed_samples = int(
+            self.cfg.audio.sample_rate
+            * self.cfg.asr.streaming_max_untranscribed_ms
+            / 1000.0
+        )
+        return (
+            partial_samples >= int(total_samples * self.cfg.asr.streaming_reuse_ratio)
+            and total_samples - partial_samples <= max_untranscribed_samples
         )
 
     def _asr_context_prompt(self, app_ctx, boost_terms: list[str]) -> str | None:

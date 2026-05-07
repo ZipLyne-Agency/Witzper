@@ -54,11 +54,12 @@ class CommandModeController:
         self._selection: str = ""
         self._task: asyncio.Task | None = None
         self._busy: bool = False
+        self._recording: bool = False
 
     # ---- Hotkey callbacks -------------------------------------------------
 
     def on_down(self) -> None:
-        if self._busy:
+        if self._busy or self._recording:
             return
         # Capture selection FIRST so the keystroke doesn't shift focus.
         self._selection = self._capture_selection()
@@ -75,10 +76,14 @@ class CommandModeController:
                 "selection_chars": len(self._selection),
             }
         )
+        self._recording = True
 
     def on_up(self) -> None:
+        if not self._recording:
+            return
         if not self._busy and self._task is not None and not self._task.done():
             return
+        self._recording = False
         audio = self.audio.stop()
         stream.emit({"type": "command", "state": "processing"})
         if audio.size == 0:

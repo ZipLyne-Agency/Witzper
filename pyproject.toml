@@ -1,6 +1,6 @@
 [project]
 name = "Witzper"
-version = "0.1.0"
+version = "0.2.5"
 description = "Fully local dictation for macOS Apple Silicon"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -74,3 +74,6 @@ ignore = ["E501", "B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.mypy]
+ignore_missing_imports = true

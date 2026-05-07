@@ -47,7 +47,7 @@ cat > "${CONTENTS}/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Isaac Horowitz. MIT license.</string>
     <key>NSMicrophoneUsageDescription</key><string>Witzper transcribes your voice entirely on this device.</string>
@@ -148,9 +148,9 @@ if [[ "${WITZPER_SKIP_PYTHON_BUNDLE:-0}" != "1" ]]; then
 
     # Strip obvious dead weight from the bundled runtime to keep the zip
     # download reasonable. MLX still dominates at ~150 MB but every MB helps.
-    find "${PY_ROOT}" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+    find "${RES}" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
     find "${PY_ROOT}" -type d -name "tests" -prune -exec rm -rf {} + 2>/dev/null || true
-    find "${PY_ROOT}" -type f -name "*.pyc" -delete 2>/dev/null || true
+    find "${RES}" -type f -name "*.pyc" -delete 2>/dev/null || true
 
     # Sanity check: the bundled python must not contain any absolute
     # references to the build machine's paths, otherwise the whole

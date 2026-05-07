@@ -110,13 +110,13 @@ class InsertionCfg(BaseModel):
 class PersonalizationCfg(BaseModel):
     auto_add_to_dictionary: bool = True
     edit_watch_window_seconds: int = 10
-    cleanup_lora_enabled: bool = True
+    cleanup_lora_enabled: bool = False
     cleanup_lora_rank: int = 16
     cleanup_lora_schedule_cron: str = "0 3 * * *"
-    asr_lora_enabled: bool = True
+    asr_lora_enabled: bool = False
     asr_lora_rank: int = 8
     asr_lora_schedule_cron: str = "0 4 */14 * *"
-    dspy_enabled: bool = True
+    dspy_enabled: bool = False
 
 
 class UiCfg(BaseModel):

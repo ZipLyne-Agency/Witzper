@@ -22,6 +22,9 @@ struct DaemonEvent: Decodable {
     let snippet_count: Int?
     let correction_count: Int?
     let styles: [String: String]?
+    let state: String?
+    let text: String?
+    let error: String?
 }
 
 // MARK: - Observable state
@@ -47,7 +50,7 @@ final class DashboardState: ObservableObject {
     ]
     @Published var status: String = "OFFLINE"
     @Published var asrModel: String = "parakeet-tdt-0.6b-v3"
-    @Published var llmModel: String = "Qwen3-30B-A3B-Instruct-2507-8bit"
+    @Published var llmModel: String = "Qwen3-8B-4bit"
     @Published var hotkeyLabel: String = "Right ⌥ Option"
     @Published var micLevel: Float = 0
     @Published var latencyHistory: [Double] = Array(repeating: 0, count: 60)
@@ -70,6 +73,19 @@ final class DashboardState: ObservableObject {
         switch event.type {
         case "ready":
             status = "READY"
+            isListening = false
+        case "recording":
+            if event.state == "start" {
+                status = "LISTENING"
+                isListening = true
+            } else if event.state == "stop" {
+                status = "PROCESSING"
+                isListening = false
+            }
+        case "partial":
+            if isListening {
+                status = "LISTENING"
+            }
         case "transcript":
             let entry = TranscriptEntry(
                 timestamp: Date(),
@@ -87,6 +103,25 @@ final class DashboardState: ObservableObject {
             lastLlmMs = event.llm_ms ?? 0
             latencyHistory.removeFirst()
             latencyHistory.append(event.total_ms ?? 0)
+            status = "READY"
+            isListening = false
+        case "command":
+            switch event.state {
+            case "listening":
+                status = "COMMAND LISTENING"
+                isListening = true
+            case "processing":
+                status = "COMMAND PROCESSING"
+                isListening = false
+            case "idle":
+                status = "READY"
+                isListening = false
+            default:
+                break
+            }
+        case "command_result":
+            status = "READY"
+            isListening = false
         case "stats":
             dictSize = event.dict_size ?? dictSize
             snippetCount = event.snippet_count ?? snippetCount
@@ -421,6 +456,11 @@ struct DashboardView: View {
 
     private var rightPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("MANUAL DICTATION")
+            manualDictationButton
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+
             sectionHeader("MIC LEVEL")
             MicLevelMeter(level: state.micLevel)
                 .frame(height: 24)
@@ -441,7 +481,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 6) {
                 kv("AUTO-LEARN", "ON", .bbGreen)
                 kv("EDIT WATCH", "10s", .bbAmber)
-                kv("LORA NIGHTLY", "ENABLED", .bbGreen)
+                kv("LORA", "MANUAL", .bbAmber)
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
@@ -458,6 +498,35 @@ struct DashboardView: View {
             Spacer()
         }
         .background(Color.bbBlack)
+    }
+
+    private var manualDictationButton: some View {
+        let recording = state.status == "LISTENING"
+        let disabled = state.status.hasPrefix("COMMAND") || state.status == "PROCESSING"
+        return Button(action: {
+            guard let delegate = NSApp.delegate as? AppDelegate else { return }
+            if recording {
+                delegate.manualDictationStop()
+            } else {
+                delegate.manualDictationStart()
+            }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: recording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 13, weight: .bold))
+                Text(recording ? "STOP" : "RECORD")
+                    .font(.bbHeader)
+            }
+            .foregroundColor(recording ? .bbRed : .bbGreen)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .overlay(RoundedRectangle(cornerRadius: 3)
+                .stroke(recording ? Color.bbRed : Color.bbGreen, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1.0)
+        .help(recording ? "Stop recording and transcribe" : "Record and transcribe without using the hotkey")
     }
 
     // MARK: status bar
@@ -692,7 +761,7 @@ final class DashboardWindowController: NSWindowController {
 
     func showDashboard() {
         DaemonStreamReader.shared.start()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }

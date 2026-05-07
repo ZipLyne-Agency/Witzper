@@ -9,12 +9,14 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from argparse import ArgumentParser
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
 from flow.config import load_config
+from flow.core.vad import make_vad
 from flow.models.cleanup import CleanupLLM
 from flow.models.parakeet import ParakeetASR
 
@@ -45,13 +47,29 @@ def synth_audio(out_path: Path) -> None:
 
 
 def main() -> int:
-    cfg = load_config()
+    parser = ArgumentParser(description="Run a synthesized-audio Witzper pipeline test.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional config TOML, useful for testing lower-memory models.",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
     print(f"config loaded; ASR: {cfg.asr.speed.model}; LLM: {cfg.cleanup.model}")
 
     test_wav = Path("/tmp/flow-test.wav")
     synth_audio(test_wav)
     audio, sr = sf.read(test_wav)
     print(f"audio: {len(audio)/sr:.2f}s @ {sr} Hz, dtype={audio.dtype}")
+    audio = audio.astype(np.float32)
+
+    print("→ VAD trim")
+    t0 = time.perf_counter()
+    vad = make_vad(cfg.vad)
+    audio = vad.trim(audio, sr=sr)
+    print(f"  done in {(time.perf_counter()-t0)*1000:.0f}ms; kept {len(audio)/sr:.2f}s")
 
     print("→ loading Parakeet")
     t0 = time.perf_counter()
@@ -60,7 +78,7 @@ def main() -> int:
 
     print("→ transcribing")
     t0 = time.perf_counter()
-    result = asr.transcribe(audio.astype(np.float32), sample_rate=sr)
+    result = asr.transcribe(audio, sample_rate=sr)
     print(f"  done in {(time.perf_counter()-t0)*1000:.0f}ms")
     print(f"  raw: {result.text!r}")
 

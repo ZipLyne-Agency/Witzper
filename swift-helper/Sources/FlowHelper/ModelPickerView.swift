@@ -347,21 +347,9 @@ enum UserConfigWriter {
 
 enum DaemonControl {
     static func restart() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let script = """
-        cd \(home)/Witzper && source .venv/bin/activate && \
-        pkill -9 -f 'flow run' ; pkill -9 -f 'Witzper.*--verbose' ; sleep 1 ; \
-        rm -f /tmp/Witzper.pid ; \
-        if [[ -x ./Witzper ]]; then \
-          PATH=/opt/homebrew/bin:$PATH nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
-        else \
-          PATH=/opt/homebrew/bin:$PATH nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
-        fi
-        """
-        let p = Process()
-        p.launchPath = "/bin/zsh"
-        p.arguments = ["-c", script]
-        try? p.run()
+        if let delegate = NSApp.delegate as? AppDelegate {
+            delegate.restartPythonDaemon()
+        }
     }
 }
 

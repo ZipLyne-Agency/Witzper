@@ -15,6 +15,39 @@ def test_default_config_loads() -> None:
     assert cfg.audio.trailing_ms == 650
     assert cfg.asr.streaming_reuse_ratio >= 0.98
     assert cfg.asr.streaming_max_untranscribed_ms == 250
+    assert cfg.personalization.cleanup_lora_enabled is False
+    assert cfg.personalization.asr_lora_enabled is False
+    assert cfg.personalization.dspy_enabled is False
     # Hotkey registry back-compat: both default actions present.
     assert "dictate" in cfg.hotkeys
     assert "command" in cfg.hotkeys
+
+
+def test_hotkeys_dictate_override_wins(tmp_path) -> None:
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        """
+[hotkeys.dictate]
+key = "right_cmd"
+mode = "hold"
+""".strip()
+    )
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.hotkeys["dictate"].key == "right_cmd"
+
+
+def test_legacy_hotkey_migrates_to_dictate_binding(tmp_path) -> None:
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        """
+[hotkey]
+key = "caps_lock"
+toggle_mode = false
+""".strip()
+    )
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.hotkeys["dictate"].key == "caps_lock"

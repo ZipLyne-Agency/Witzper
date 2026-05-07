@@ -12,15 +12,16 @@ if [[ ! -f "$USER_CFG" ]]; then
   python -m flow setup
 fi
 
-# Read hotkey from user config (fall back to right_option)
-HOTKEY=$(python -c "
-import tomli, os
-p=os.path.expanduser('~/.config/Witzper/config.toml')
-try:
-    with open(p,'rb') as f: print(tomli.load(f).get('hotkey',{}).get('key','right_option'))
-except Exception:
-    print('right_option')
-")
+# Read the active dictate binding through the same config loader used by the
+# daemon. This respects [hotkeys.dictate], default config, and legacy [hotkey].
+HOTKEY=$(python - <<'PY'
+from flow.config import load_config
+
+cfg = load_config()
+binding = cfg.hotkeys.get("dictate")
+print((binding.key if binding and binding.key else cfg.hotkey.key) or "right_option")
+PY
+)
 
 HELPER=swift-helper/.build/release/flow-helper
 if [[ -x "$HELPER" ]]; then

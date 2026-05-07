@@ -67,6 +67,11 @@ def run(
     except KeyboardInterrupt:
         console.print("\n[dim]shutting down[/]")
     finally:
+        from flow.ui import stream
+
+        if stream._server is not None:
+            stream._server.close()
+            stream._server = None
         pid_path.unlink(missing_ok=True)
 
 
@@ -135,10 +140,9 @@ def style(
     name: str = typer.Argument(None, help="formal | casual | very_casual | excited"),
 ) -> None:
     """View or set Flow Styles per app category."""
-    import tomli
-
     from flow.config import USER_CONFIG_PATH
     from flow.context.styles import CATEGORIES, STYLE_INSTRUCTIONS, StyleResolver  # noqa: F401
+    from flow.core.user_config import update_user_config
 
     cfg = load_config()
 
@@ -158,25 +162,10 @@ def style(
     if name not in STYLE_INSTRUCTIONS:
         raise typer.BadParameter(f"style must be one of: {', '.join(STYLE_INSTRUCTIONS)}")
 
-    USER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing: dict = {}
-    if USER_CONFIG_PATH.exists():
-        with USER_CONFIG_PATH.open("rb") as f:
-            existing = tomli.load(f)
-    existing.setdefault("styles", {})[category] = name
+    def mutate(existing: dict) -> None:
+        existing.setdefault("styles", {})[category] = name
 
-    lines = ["# Witzper user config", ""]
-    for section, kv in existing.items():
-        lines.append(f"[{section}]")
-        for k, v in kv.items():
-            if isinstance(v, bool):
-                lines.append(f"{k} = {'true' if v else 'false'}")
-            elif isinstance(v, (int, float)):
-                lines.append(f"{k} = {v}")
-            else:
-                lines.append(f'{k} = "{v}"')
-        lines.append("")
-    USER_CONFIG_PATH.write_text("\n".join(lines))
+    update_user_config(USER_CONFIG_PATH, mutate)
     console.print(f"[green]✓[/] {category} → [bold]{name}[/]")
     console.print("[dim]restart the daemon for the change to take effect[/]")
 

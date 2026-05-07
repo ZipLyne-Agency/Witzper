@@ -542,7 +542,7 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     func show() {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
 }

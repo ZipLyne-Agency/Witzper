@@ -101,4 +101,8 @@ class PyannoteVAD:
 def make_vad(cfg: VadCfg) -> VADBackend:
     if cfg.backend == "silero":
         return SileroVAD(cfg)
-    return PyannoteVAD(cfg.model)
+    try:
+        return PyannoteVAD(cfg.model)
+    except Exception as e:  # noqa: BLE001
+        print(f"[flow] pyannote VAD unavailable; falling back to Silero: {e}")
+        return SileroVAD(cfg.model_copy(update={"backend": "silero"}))

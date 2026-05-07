@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -22,3 +22,7 @@ class ASRBackend(Protocol):
         sample_rate: int,
         context_prompt: str | None = None,
     ) -> ASRResult: ...
+
+    def supports_streaming(self) -> bool: ...
+
+    def open_stream(self) -> Any: ...

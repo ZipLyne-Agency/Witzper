@@ -118,4 +118,4 @@ class CorrectionStore:
             FROM corrections WHERE audio_path IS NOT NULL
             """
         )
-        return [(r[0], r[1]) for r in rows]
+        return [(r[0], r[1]) for r in rows if Path(r[0]).exists()]

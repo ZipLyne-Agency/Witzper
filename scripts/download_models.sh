@@ -4,11 +4,10 @@ set -euo pipefail
 # Prefetch the model weights used by Witzper. These go into the HF hub cache
 # (~/.cache/huggingface/hub) so MLX can load them without a network trip.
 #
-# Default set ~= 40 GB:
+# Default set ~= 7 GB:
 #   Parakeet v3                                  ~1 GB
-#   Qwen3-30B-A3B-Instruct-2507 8-bit            ~32 GB
-#   pyannote segmentation 3.1                    ~200 MB
-#   MiniLM-L6 sentence embedder                  ~100 MB
+#   Qwen3-8B cleanup model                       ~5 GB
+# Optional heavier models can be selected later from the dashboard.
 
 # Auto-activate venv if present
 if [[ -f "$(dirname "$0")/../.venv/bin/activate" ]]; then
@@ -20,15 +19,12 @@ python -m pip install -q "huggingface_hub[cli]" 2>/dev/null || true
 echo "→ Parakeet TDT v3 (speed mode ASR)"
 hf download mlx-community/parakeet-tdt-0.6b-v3
 
-echo "→ Qwen3-30B-A3B-Instruct-2507 8-bit (cleanup LLM)"
-hf download mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit
+echo "→ Qwen3-8B 4-bit (default cleanup LLM)"
+hf download mlx-community/Qwen3-8B-4bit
 
 echo "→ pyannote segmentation 3.1 (VAD, optional — requires HF auth + license accept)"
 hf download pyannote/segmentation-3.1 2>/dev/null || \
   echo "  skipped (not authenticated; Silero will be used instead)"
-
-echo "→ MiniLM-L6-v2 (few-shot embedder)"
-hf download sentence-transformers/all-MiniLM-L6-v2
 
 echo
 echo "→ Qwen3-ASR MLX (accuracy mode ASR) — manual step"

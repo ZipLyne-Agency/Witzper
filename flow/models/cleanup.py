@@ -1,6 +1,7 @@
 """Hot-path LLM cleanup via MLX-LM with persistent prompt caching.
 
-Uses Qwen3-30B-A3B-Instruct by default: 30B MoE with ~3B active params.
+Uses the configured MLX cleanup model. The shipped default is Qwen3-8B-4bit;
+larger Qwen3 models are opt-in for higher-memory Macs.
 
 Speed strategy:
 1. **Static prefix cache** — system prompt + built-in few-shots are tokenized
@@ -18,13 +19,20 @@ Speed strategy:
 from __future__ import annotations
 
 import copy as _pycopy
+import re
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from rapidfuzz.distance import Levenshtein
 from rich.console import Console
 
 from flow.config import CleanupCfg
+from flow.models.mlx_loader import (
+    apply_chat_template_no_think,
+    load_model_and_tokenizer,
+    strip_thinking_blocks,
+)
 
 _console = Console()
 
@@ -80,11 +88,9 @@ BUILTIN_FEW_SHOTS = [
 class CleanupLLM:
     def __init__(self, cfg: CleanupCfg):
         self.cfg = cfg
-        try:
-            from mlx_lm import load
-        except ImportError as e:
-            raise RuntimeError("pip install mlx-lm") from e
-        self.model, self.tokenizer = load(cfg.model)
+        self.model: Any
+        self.tokenizer: Any
+        self.model, self.tokenizer = load_model_and_tokenizer(cfg.model)
 
         self._prefix_cache_snapshot: list | None = None
         self._prefix_token_count: int = 0
@@ -113,8 +119,10 @@ class CleanupLLM:
         except ImportError:
             return
 
-        prefix_str = self.tokenizer.apply_chat_template(
-            self._prefix_messages(), tokenize=False, add_generation_prompt=False
+        prefix_str = apply_chat_template_no_think(
+            self.tokenizer,
+            self._prefix_messages(),
+            add_generation_prompt=False,
         )
         prefix_ids = self.tokenizer.encode(prefix_str)
         # Keep the raw token ids around so per-call prefix-check is an O(N)
@@ -183,9 +191,9 @@ class CleanupLLM:
             few_shots=few_shots or [],
             style_instruction=style_instruction,
         )
-        cleaned = self._generate(messages)
+        cleaned = self._remove_common_fillers(self._generate(messages))
         if self._hallucinated(raw_transcript, cleaned):
-            return raw_transcript
+            return self._remove_common_fillers(raw_transcript)
         return cleaned
 
     def _lightweight_format(self, text: str) -> str:
@@ -204,6 +212,32 @@ class CleanupLLM:
         if text[-1].isalnum() and not any(c in text for c in ("@", "://", "#")):
             text += "."
         return text
+
+    def _remove_common_fillers(self, text: str) -> str:
+        """Deterministically remove low-risk filler tokens the LLM may leave.
+
+        This intentionally handles only isolated classic fillers. Ambiguous
+        words like "like" are left to the model because they often carry
+        meaning in normal dictation.
+        """
+        original = text.strip()
+        out = re.sub(
+            r"(?i)(^|[.!?]\s+|[,;:]\s+|\s+)(um|uh|erm)[,;:]?(?=\s|[.!?]|$)",
+            r"\1",
+            text,
+        )
+        out = re.sub(r"\s+([,;:.!?])", r"\1", out)
+        out = re.sub(r"\s{2,}", " ", out).strip()
+        changed = out != original
+        if changed:
+            out = re.sub(
+                r"([.!?])\s+([a-z])",
+                lambda m: f"{m.group(1)} {m.group(2).upper()}",
+                out,
+            )
+        if changed and out and out[0].isalpha():
+            out = out[0].upper() + out[1:]
+        return out
 
     # --------------------------------------------------------------
 
@@ -245,8 +279,10 @@ class CleanupLLM:
         import mlx.core as mx
         from mlx_lm import stream_generate
 
-        prompt_str = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        prompt_str = apply_chat_template_no_think(
+            self.tokenizer,
+            messages,
+            add_generation_prompt=True,
         )
         full_ids = self.tokenizer.encode(prompt_str)
 
@@ -273,7 +309,7 @@ class CleanupLLM:
             prompt_cache=cache,
         ):
             out_pieces.append(resp.text)
-        return "".join(out_pieces).strip()
+        return strip_thinking_blocks("".join(out_pieces))
 
     def _hallucinated(self, raw: str, cleaned: str) -> bool:
         if not cleaned:

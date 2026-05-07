@@ -43,14 +43,14 @@ It's built to match or beat [Wispr Flow](https://wisprflow.ai) on latency and tr
 | **Where your voice goes** | Stays on your Mac. Always. | Cloud (their servers). |
 | **Cost** | Free. MIT licensed. | Subscription. |
 | **Works offline** | ✅ Yes | ❌ No |
-| **Model quality** | 30B-parameter Qwen3 MoE running locally | Proprietary cloud model |
-| **Personalization** | Nightly LoRA fine-tune on **your** edits | Global model, tweaks via dictionary only |
+| **Model quality** | Swappable local cleanup models up to Qwen3 30B-A3B | Proprietary cloud model |
+| **Personalization** | Local dictionary, snippets, edit watcher, and manual LoRA export on **your** edits | Global model, tweaks via dictionary only |
 | **Swappable models** | ✅ Pick any of 7 cleanup LLMs + 4 ASR models | ❌ Locked |
-| **Voice snippets with variables** | ✅ `{date}`, `{time}`, `{cursor}` *(coming)* | Plain snippets only |
+| **Voice snippets** | ✅ Local trigger → expansion snippets | Plain snippets only |
 | **Telemetry** | None. Ever. | Opt-out analytics |
 | **Source code** | Open | Closed |
 
-The cost: you need a recent Apple Silicon Mac with real RAM. The default setup wants **32 GB**. See [system requirements](#-system-requirements).
+The cost: you need a recent Apple Silicon Mac with enough unified memory for the model you choose. The default setup targets **16 GB+** Macs. See [system requirements](#-system-requirements).
 
 ---
 
@@ -66,7 +66,7 @@ One line. This is how most people should install Witzper.
 brew install --cask ZipLyne-Agency/witzper/witzper
 ```
 
-Homebrew strips the `com.apple.quarantine` xattr automatically, so macOS Gatekeeper won't block first launch even though Witzper isn't notarized. After install, grant **Accessibility** + **Input Monitoring** under *System Settings → Privacy & Security*, then open Witzper from `/Applications`.
+Homebrew strips the `com.apple.quarantine` xattr automatically, so macOS Gatekeeper won't block first launch even though Witzper isn't notarized. After install, open Witzper from `/Applications` and grant **Microphone**, **Accessibility**, and **Input Monitoring** under *System Settings → Privacy & Security*.
 
 Upgrade later with:
 ```bash
@@ -119,23 +119,23 @@ cd ~/Witzper
 ./scripts/setup.sh
 ```
 
-This creates a Python virtual environment, installs every Python dependency, and builds the Swift menu-bar helper. Grab a coffee.
+This creates a Python virtual environment, installs every Python dependency, and builds the Swift menu-bar helper.
 
-### Step 3 — Download the AI models (~40 GB, ~15 minutes on fast internet)
+### Step 3 — Download the AI models (~7 GB, time depends on your connection)
 
 ```bash
 ./scripts/download_models.sh
 ```
 
-By default this pulls the **Parakeet** speech-recognition model (~1 GB) and the **Qwen3-30B** cleanup model (~32 GB). If you're on a 16 GB Mac, see [System requirements](#-system-requirements) for smaller options you can configure *before* running this.
+By default this pulls the **Parakeet** speech-recognition model and the **Qwen3-8B 4-bit** cleanup model. Heavier cleanup models can be selected later from the dashboard if your Mac has enough memory.
 
 ### Step 4 — Grant permissions
 
 On first launch Witzper will ask for three macOS permissions. All three are required:
 
-1. **Microphone** — to hear you.
-2. **Accessibility** — to capture the global hotkey and read the focused text field's context.
-3. **Input Monitoring** — same reason, macOS splits this from Accessibility.
+1. **Microphone** — to record speech.
+2. **Accessibility** — to read focused-field context and insert the final transcript.
+3. **Input Monitoring** — to capture the global push-to-talk hotkey. Dashboard manual recording does not need this, but global hotkeys do.
 
 For each prompt, macOS will open *System Settings → Privacy & Security*. Flip the toggle next to **Witzper**, then relaunch.
 
@@ -145,7 +145,7 @@ For each prompt, macOS will open *System Settings → Privacy & Security*. Flip 
 ./scripts/run.sh
 ```
 
-The first time you run this, it'll ask you to pick a push-to-talk hotkey (default **Fn**). Then you'll see the Witzper waveform icon in your menu bar. **Hold Fn**, say *"hey are you free for lunch tomorrow"*, release. It should type back `Hey are you free for lunch tomorrow?` into whatever field you have focused.
+The first time you run this, it'll ask you to pick a push-to-talk hotkey (default **Fn**). Then you'll see the Witzper waveform icon in your menu bar. **Hold Fn**, say *"hey are you free for lunch tomorrow"*, release. It should type back `Hey are you free for lunch tomorrow?` into whatever field you have focused. You can also open the dashboard and click **Record** / **Stop** to dictate without using a hotkey.
 
 That's it. Stop the daemon with **⌃C** in the terminal.
 
@@ -161,28 +161,27 @@ Witzper runs real language models in unified memory. How much RAM you have deter
 |---|---|---|
 | **16 GB** | Qwen3 4B (4-bit) or Llama 3.2 3B | Fast, decent quality, 80 ms cleanup |
 | **32 GB** | Qwen3 14B (8-bit) | Near-flagship quality, 180 ms cleanup |
-| **64 GB+** | **Qwen3 30B-A3B (8-bit)** ← default | Witzper's sweet spot, 250 ms cleanup |
+| **64 GB+** | **Qwen3 30B-A3B (8-bit)** | Witzper's high-quality mode, 250 ms cleanup |
 
 ### Hard requirements
 - **Mac with Apple Silicon** (M1, M2, M3, M4, M5 — *not* Intel)
 - **macOS 14.0 Sonoma** or newer
-- **Python 3.11+** (3.13 recommended)
-- **ffmpeg** (for audio decoding)
-- **Xcode command-line tools** (for building the Swift helper)
-- **~40 GB free disk** for the default model set (more if you want Command Mode)
+- **Python 3.11+** (3.13 recommended) for source builds. The release app bundles its own Python runtime.
+- **ffmpeg** for source builds and local development utilities.
+- **Xcode command-line tools** for source builds.
+- **~10 GB free disk** for the default model set (more if you choose heavier models)
 - **Internet for the first run only** (model download). After that: fully offline.
 
 ### Steady-state memory use (default config)
 
 | Component | RAM |
 |---|---|
-| Qwen3-30B-A3B cleanup LLM (8-bit) | ~32 GB |
+| Qwen3-8B cleanup LLM (4-bit) | ~5 GB |
 | Parakeet TDT 0.6B v3 (ASR) | ~1 GB |
-| MiniLM few-shot embedder | ~150 MB |
 | Silero VAD | ~50 MB |
 | Witzper menu-bar app + dashboard | ~80 MB |
 | Python daemon overhead | ~3 GB |
-| **Total hot path** | **~36 GB** |
+| **Total hot path** | **~9 GB** |
 
 ### Network
 
@@ -204,9 +203,9 @@ Runs on every utterance. Takes the raw transcript and fixes grammar, punctuation
 | `mlx-community/Llama-3.2-1B-Instruct-4bit` | Llama 3.2 1B | 0.7 GB | ~40 ms | ★★★ | Oldest M1 Macs |
 | `mlx-community/Llama-3.2-3B-Instruct-4bit` | Llama 3.2 3B | 2 GB | ~70 ms | ★★★ | 8–16 GB Macs |
 | `mlx-community/Qwen3-4B-Instruct-2507-4bit` | Qwen3 4B | 2.5 GB | ~80 ms | ★★★★ | **Recommended for 16 GB Macs** |
-| `mlx-community/Qwen3-8B-Instruct-2507-4bit` | Qwen3 8B | 5 GB | ~120 ms | ★★★★ | 16–24 GB Macs |
+| `mlx-community/Qwen3-8B-4bit` | **Qwen3 8B** *(default)* | 5 GB | ~120 ms | ★★★★ | 16–24 GB Macs |
 | `mlx-community/Qwen3-14B-Instruct-2507-8bit` | Qwen3 14B | 15 GB | ~180 ms | ★★★★★ | **Recommended for 32 GB Macs** |
-| `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | **Qwen3 30B-A3B** *(default)* | 32 GB | ~250 ms | ★★★★★ | **Recommended for 64 GB+ Macs** — 30B MoE with only 3B active params |
+| `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | **Qwen3 30B-A3B** | 32 GB | ~250 ms | ★★★★★ | **Recommended for 64 GB+ Macs** — 30B MoE with only 3B active params |
 
 ### 2. ASR — speech-to-text
 
@@ -230,21 +229,22 @@ A separate hotkey (default `right_cmd+right_option`) triggers Command Mode for t
 | Model | Label | RAM | Notes |
 |---|---|---|---|
 | `mlx-community/Qwen3-14B-Instruct-2507-4bit` | Qwen3 14B (light) | 8 GB | For 32 GB Macs |
-| `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | **Qwen3 30B-A3B (shared — default)** | 0 GB extra | Reuses the cleanup model already in memory |
+| `mlx-community/Qwen3-8B-4bit` | **Qwen3 8B (shared — default)** | 0 GB extra | Reuses the cleanup model already in memory |
 
-> **Note**: Command Mode's inference backend (`flow/models/command.py`) is implemented, but the hotkey wiring is not in this release. See [Experimental features](#-experimental--coming-soon).
+> **Note**: Command Mode is wired to the separate command hotkey, but remains experimental while the transform UX is tuned.
 
 ### Auxiliary models (always loaded)
 - **VAD**: Silero (default, unauthenticated) or `pyannote/segmentation-3.1` (requires HF license accept).
-- **Few-shot embedder**: `sentence-transformers/all-MiniLM-L6-v2` — embeds your past corrections so similar ones get retrieved as in-context examples during cleanup.
+- **Few-shot retrieval** uses local SQLite corrections with RapidFuzz token matching. No embedding model or transformer runtime is loaded for retrieval.
 
 ---
 
 ## ✨ Features
 
 ### Core dictation
-- 🎙 **Push-to-talk dictation** — hold Fn / Right ⌥ / Right ⌘ / Right ⇧ / Caps Lock, speak, release.
-- 🧠 **Local LLM cleanup** — 30B-parameter MoE model fixes grammar, punctuation, and disfluencies on every utterance.
+- 🎙 **Push-to-talk dictation** — hold Fn, a typed character, a function key, Right ⌥ / Right ⌘ / Right ⇧ / Caps Lock, or a modifier chord; speak; release.
+- 🖱 **Manual dashboard recording** — click **Record** / **Stop** in the dashboard to record and transcribe without using a hotkey.
+- 🧠 **Local LLM cleanup** — a swappable local MLX model fixes grammar, punctuation, and disfluencies on every utterance.
 - 📡 **Streaming partial transcripts in the HUD** — see your words appear live as you speak, with the exact text the model currently hears.
 - ⚡ **Pre-flight ASR** — the speech model processes audio *while you're still talking*, so by the time you release the hotkey the raw transcript is already done. End-to-end latency roughly halved.
 - 🎯 **Context-aware ASR** *(accuracy mode)* — the model is given your focused app, window title, surrounding text, and personal vocabulary so it nails proper nouns.
@@ -257,9 +257,9 @@ A separate hotkey (default `right_cmd+right_option`) triggers Command Mode for t
 - 🪄 **Voice snippets** — say *"my address"*, get `123 Main St`. Case-insensitive whole-word matching.
 - 🎨 **Flow Styles per app category** — Casual / Formal / Very Casual / Excited, mapped independently to Personal Messages / Work Messages / Email / Other.
 - 👀 **Edit watcher** — Witzper watches the focused field for 10 s after inserting text. Any edit you make becomes a training pair for your personal LoRA.
-- 🔁 **Few-shot retrieval** — MiniLM embeds the current transcript, pulls the top-5 most similar past corrections, feeds them to the cleanup LLM as in-context examples. Quality improves from day one with zero training.
-- 🌙 **Nightly cleanup LoRA** — `mlx-lm` trains a rank-16 LoRA over your `(raw → cleaned)` pairs while you sleep. Adapters hot-swap without reloading the base model. Cron: `0 3 * * *`.
-- 🎤 **Biweekly ASR LoRA** *(scaffolded)* — rank-8 LoRA over `(audio → transcript)` pairs. Cron: `0 4 */14 * *`.
+- 🔁 **Few-shot retrieval** — RapidFuzz finds the top-5 most similar past corrections from local SQLite and feeds them to the cleanup LLM as in-context examples. Quality improves from day one with zero training.
+- 🌙 **Manual cleanup LoRA export/training** — `flow train cleanup` can fine-tune a rank-16 cleanup adapter once you have enough correction pairs. Automatic scheduling/hot-swap is not enabled in this release.
+- 🎤 **ASR LoRA manifest export** *(scaffolded)* — `flow train asr` writes `(audio → transcript)` pairs for the Qwen3-ASR MLX trainer once that trainer is available.
 - 📊 **Automatic dictionary learning** — single-token edits within edit distance 2 append to your boost dictionary automatically.
 
 ### Dashboard (`Witzper.app`)
@@ -267,7 +267,7 @@ Open via the menu-bar icon or `flow doctor`. Tabs:
 - **Live** — real-time transcript stream with per-stage latency (VAD / ASR / LLM / total).
 - **Dictionary** — add, remove, browse boost words and replacement rules.
 - **Snippets** — manage voice-snippet expansions.
-- **Settings** — swap models (cleanup / ASR / command) from the catalog, pick your hotkey, choose a microphone, set Flow Styles.
+- **Settings** — swap models (cleanup / ASR / command) from the catalog, type the character or key you want as your hotkey, choose a microphone, set Flow Styles.
 
 ### UI niceties
 - 🔴 **Floating HUD pill** — pulsing red dot + status + live partial transcript, always on top, works across Spaces.
@@ -315,8 +315,16 @@ Defaults live in [`configs/default.toml`](configs/default.toml). To override any
 
 ```toml
 [hotkey]
-key = "fn"                # "fn" | "right_option" | "right_cmd" | "right_shift" | "caps_lock"
+key = "fn"                # legacy fallback; new installs use [hotkeys.*]
 toggle_mode = false
+
+[hotkeys.dictate]
+key = "fn"                # typed char ("a"), standalone ("space", "f5"), modifier, or chord
+mode = "hold"
+
+[hotkeys.command]
+key = "right_cmd+right_option"
+mode = "hold"
 
 [audio]
 sample_rate = 16000
@@ -345,7 +353,7 @@ backend = "qwen3-asr-mlx"
 context_prompt_max_tokens = 1024
 
 [cleanup]
-model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+model = "mlx-community/Qwen3-8B-4bit"
 max_tokens = 96
 temperature = 0.0
 few_shot_n = 5
@@ -354,9 +362,9 @@ max_edit_distance_ratio = 0.5
 
 [command]
 enabled = true
-model = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+model = "mlx-community/Qwen3-8B-4bit"
 max_tokens = 2048
-hotkey = "right_cmd+right_option"
+hotkey = ""                         # legacy; command hotkey lives in [hotkeys.command]
 
 [insertion]
 default_strategy = "paste"          # "paste" | "type"
@@ -365,13 +373,13 @@ restore_clipboard_after_ms = 200
 [personalization]
 auto_add_to_dictionary = true
 edit_watch_window_seconds = 10
-cleanup_lora_enabled = true
+cleanup_lora_enabled = false
 cleanup_lora_rank = 16
 cleanup_lora_schedule_cron = "0 3 * * *"
-asr_lora_enabled = true
+asr_lora_enabled = false
 asr_lora_rank = 8
 asr_lora_schedule_cron = "0 4 */14 * *"
-dspy_enabled = true
+dspy_enabled = false
 
 [styles]
 personal_messages = "casual"
@@ -410,10 +418,10 @@ ASR (Parakeet / Qwen3-ASR / Whisper)
    └── personal dictionary boost terms
         │
         ▼
-Few-shot retriever (MiniLM + SQLite)
+Few-shot retriever (RapidFuzz + SQLite)
         │
         ▼
-Cleanup LLM (Qwen3-30B-A3B MoE via MLX)
+Cleanup LLM (Qwen3-8B default, swappable via MLX)
    + Flow Style instruction per app category
    + top-5 few-shots
    + alt-hypothesis rerank
@@ -428,7 +436,7 @@ Dictionary replace → Snippet expansion
 Inserter (clipboard paste or keystroke)
         │
         ▼
-Edit watcher (captures corrections → nightly LoRA)
+Edit watcher (captures corrections → manual LoRA export/training)
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the full walkthrough.
@@ -439,9 +447,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the full walkthrough.
 
 | Mode | Components | End-to-end p50 |
 |---|---|---|
-| Speed | Parakeet + Qwen3-30B-A3B | 200–350 ms |
-| Accuracy | Qwen3-ASR + Qwen3-30B-A3B | 350–600 ms |
-| Command Mode | Qwen3-30B-A3B (shared) | 800 ms–2 s |
+| Speed | Parakeet + Qwen3-8B | 250–500 ms |
+| Accuracy | Qwen3-ASR + Qwen3-8B | 400–800 ms |
+| Command Mode | Qwen3-8B (shared) | 1–4 s |
 
 Per-stage budget:
 
@@ -450,7 +458,7 @@ Per-stage budget:
 | VAD endpoint trim | ≤ 30 ms |
 | Parakeet ASR | 40–80 ms |
 | Qwen3-ASR | 150–300 ms |
-| Cleanup LLM (Qwen3-30B) | 150–250 ms |
+| Cleanup LLM (Qwen3-8B) | 100–250 ms |
 | Insertion | ≤ 10 ms |
 
 With streaming + pre-flight ASR (IDEAS #1 + #2), the **perceived** latency is closer to *(cleanup LLM) + (insertion)* because the ASR work overlaps with speech.
@@ -462,10 +470,10 @@ With streaming + pre-flight ASR (IDEAS #1 + #2), the **perceived** latency is cl
 These features live in the codebase but are not fully wired in the current release. Clearly marked so nobody gets surprised:
 
 - **Qwen3-ASR accuracy mode** — the wrapper (`flow/models/qwen3_asr.py`) is ready, but the community `qwen3-asr-mlx` package is still stabilizing. Until it's on PyPI, Witzper falls back to Parakeet and ignores `asr.mode = "accuracy"`. Track progress in [IDEAS.md](IDEAS.md).
-- **Command Mode hotkey** — `flow/models/command.py` can run transformations using the shared cleanup model, but the second-hotkey listener that feeds it *"rewrite this email"* style instructions isn't wired yet. Planned as IDEAS #5.
+- **Command Mode** — wired to the separate command hotkey, but still marked experimental because quality and UX are still being tuned.
 - **ASR LoRA training** — `flow train asr` exports a manifest for the Qwen3-ASR MLX trainer; actual training integration is pending that same port.
 - **DSPy prompt optimization** — dependency is installed under `[personalize]` extras, runner is not yet invoked from cron.
-- **Signed DMG installer** — everything is currently source-installed. A signed `.app` bundle build lives at `scripts/build_app.sh` for personal use.
+- **Signed DMG installer** — release packaging builds a ZIP/DMG, but the app is currently ad-hoc signed rather than Developer ID notarized.
 
 See [`IDEAS.md`](IDEAS.md) for the full backlog with priorities.
 
@@ -474,7 +482,10 @@ See [`IDEAS.md`](IDEAS.md) for the full backlog with priorities.
 ## 🆘 Troubleshooting
 
 ### "The hotkey does nothing"
-You're missing Accessibility and/or Input Monitoring permission. Click the Witzper menu-bar icon → *Open Accessibility Settings…*, flip Witzper on, then *Open Input Monitoring Settings…* and do the same. **You must quit and relaunch Witzper after granting permissions** — macOS caches the old state.
+You're missing Accessibility and/or Input Monitoring permission. Click the Witzper menu-bar icon → *Open Accessibility Settings…*, flip Witzper on, then *Open Input Monitoring Settings…* and do the same. **You must quit and relaunch Witzper after granting permissions** — macOS caches the old state. If you only want to test recording, open the dashboard and use **Record** / **Stop**; that path still needs Microphone and Accessibility but not Input Monitoring.
+
+### "The dashboard Record button says permissions are missing"
+Manual recording needs Microphone access to capture audio and Accessibility access to insert the transcript. It intentionally does not require Input Monitoring because it does not listen for a global keypress.
 
 ### "No such command: flow"
 You didn't activate the venv. Run `source .venv/bin/activate` from the repo root, then try again. Or just use `./scripts/run.sh` which activates it for you.
@@ -536,7 +547,7 @@ Witzper/
 │   ├── build_app.sh              # package Witzper.app
 │   ├── build_icon.py             # .icns generator
 │   ├── test_pipeline.py          # end-to-end smoke test
-│   └── train_nightly.sh          # cron entry for LoRA training
+│   └── train_nightly.sh          # optional manual cron wrapper for LoRA training
 ├── docs/architecture.md
 ├── assets/                       # app icon + iconset
 ├── IDEAS.md                      # feature backlog
@@ -561,12 +572,13 @@ Witzper has a built-in updater. **You never need to visit GitHub to stay current
 Releases are tag-triggered. To ship a new version:
 
 ```bash
-scripts/release.sh 0.2.0
+scripts/release.sh patch
 ```
 
-That script validates the current state, bumps [`VERSION`](VERSION), commits, creates an annotated `v0.2.0` tag, and pushes everything. The push triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which on a `macos-14` runner builds `Witzper.app` in release mode, zips it with `ditto`, computes a SHA-256, and creates a GitHub Release containing:
+That script validates the current state, bumps [`VERSION`](VERSION) and `pyproject.toml`, commits, creates an annotated version tag, and pushes everything. The push triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which on a `macos-14` runner builds `Witzper.app` in release mode, zips it with `ditto`, builds a DMG, computes SHA-256 checksums, and creates a GitHub Release containing:
 
-- `Witzper-0.2.0.zip` — the downloadable app bundle.
+- `Witzper-X.Y.Z.zip` — the downloadable app bundle.
+- `Witzper-X.Y.Z.dmg` — the drag-to-install disk image.
 - `latest.json` — the manifest the in-app Updater reads.
 - Auto-generated release notes from the commits since the last tag.
 
@@ -582,6 +594,22 @@ Run the smoke test before submitting:
 ```bash
 python scripts/test_pipeline.py
 ```
+
+After installing and granting macOS permissions, run the live E2E harness:
+```bash
+python scripts/live_e2e.py
+```
+It preflights Accessibility, Input Monitoring, and Microphone before recording,
+then exercises real microphone capture, ASR, cleanup, Swift-helper insertion, and
+focused-field readback verification.
+By default it asks you to say `hey are you free for lunch tomorrow` and fails if
+the cleaned transcript is not similar enough. It opens a scratch `.txt` file in
+TextEdit as the insertion target and drives the packaged daemon through the
+Swift helper, so recording happens in the same app process users run. Pass
+`--target focused` to use the current field instead. Use `--mode direct` for the
+older harness-process capture path, and `--expect "your phrase"` or
+`--config path/to/config.toml` for alternate test runs. If preflight blocks,
+`--open-permissions` opens the missing System Settings panes.
 
 ---
 

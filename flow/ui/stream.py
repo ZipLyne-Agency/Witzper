@@ -37,6 +37,23 @@ class StreamServer:
         self._thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._thread.start()
 
+    def close(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        with self._lock:
+            clients = list(self._clients)
+            self._clients.clear()
+        for client in clients:
+            try:
+                client.close()
+            except OSError:
+                pass
+        SOCKET_PATH.unlink(missing_ok=True)
+
     def _accept_loop(self) -> None:
         assert self._sock is not None
         while True:

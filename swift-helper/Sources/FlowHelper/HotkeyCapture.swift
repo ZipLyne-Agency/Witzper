@@ -5,11 +5,10 @@
 // Raycast, CleanShot, Superwhisper, Wispr Flow all do: click a pill,
 // press your desired hotkey, it's captured.
 //
-// Witzper's dictation hotkeys are push-to-talk. That rules out most
-// letter/digit keys (they'd render text input unusable). The validator
-// enforces "must be a modifier-only press, a modifier chord, or one of
-// the known standalone keys (fn, F1-F20, space, escape, return, tab,
-// arrows, caps lock)".
+// Witzper's dictation hotkeys are push-to-talk. The picker accepts a
+// single printable character, a modifier-only press, a modifier chord,
+// or one of the known standalone keys (fn, F1-F20, space, escape,
+// return, tab, arrows, caps lock).
 
 import AppKit
 import SwiftUI
@@ -57,8 +56,10 @@ enum HotkeyName {
         }
 
         if event.type == .keyDown {
-            // Use the raw keycode — we don't want character remapping
-            // (e.g. option-e producing ´) to influence the binding.
+            if let name = printableKeyName(for: Int(event.keyCode)) { return name }
+            // Use the raw keycode for non-printables — we don't want
+            // character remapping (e.g. option-e producing ´) to influence
+            // the binding.
             if let name = nonPrintableKeyName(for: Int(event.keyCode)) { return name }
             return nil
         }
@@ -96,9 +97,23 @@ enum HotkeyName {
         }
     }
 
+    /// Map printable virtual keycodes to the Witzper config name.
+    private static func printableKeyName(for keycode: Int) -> String? {
+        let table: [Int: String] = [
+            0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g",
+            6: "z", 7: "x", 8: "c", 9: "v", 11: "b",
+            12: "q", 13: "w", 14: "e", 15: "r", 16: "y", 17: "t",
+            18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5",
+            24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+            30: "]", 31: "o", 32: "u", 33: "[", 34: "i", 35: "p",
+            37: "l", 38: "j", 39: "'", 40: "k", 41: ";", 42: "\\",
+            43: ",", 44: "/", 45: "n", 46: "m", 47: ".", 50: "`",
+        ]
+        return table[keycode]
+    }
+
     /// Map non-printable virtual keycodes (F1-F20, arrows, space, etc.)
-    /// to the Witzper config name. Returns nil for printable keys — we
-    /// intentionally refuse to bind them because they'd break text input.
+    /// to the Witzper config name.
     private static func nonPrintableKeyName(for keycode: Int) -> String? {
         let table: [Int: String] = [
             122: "f1", 120: "f2", 99: "f3", 118: "f4",
@@ -186,7 +201,7 @@ struct HotkeyCaptureField: View {
                 return nil
             }
             if event.type == .keyDown {
-                hint = "Unsupported for push-to-talk — try fn, a function key, or a modifier."
+                hint = "Unsupported for push-to-talk — try one character, fn, a function key, or a modifier."
             }
             return nil
         }

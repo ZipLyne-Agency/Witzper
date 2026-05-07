@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import soundfile as sf
@@ -45,3 +46,9 @@ class WhisperASR:
         text = result.get("text", "").strip()
         language = result.get("language")
         return ASRResult(text=text, alternatives=[], language=language)
+
+    def supports_streaming(self) -> bool:
+        return False
+
+    def open_stream(self) -> Any:
+        raise RuntimeError("mlx-whisper backend does not support streaming")

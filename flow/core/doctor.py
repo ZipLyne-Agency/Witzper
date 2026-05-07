@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -13,6 +14,7 @@ from rich.table import Table
 from flow.config import load_config
 from flow.core.hotkey import SOCKET_PATH
 from flow.insert.inserter import CONTEXT_SOCKET
+from flow.ui.stream import SOCKET_PATH as STREAM_SOCKET
 
 console = Console()
 
@@ -56,6 +58,54 @@ def _socket_accepts(path: Path) -> tuple[bool, str]:
         return False, f"{path} exists but is not accepting connections: {e}"
 
 
+def _context_rpc(op: str) -> dict | None:
+    if not CONTEXT_SOCKET.exists():
+        return None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            s.connect(str(CONTEXT_SOCKET))
+            s.sendall((json.dumps({"op": op}) + "\n").encode("utf-8"))
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        obj = json.loads(data or b"{}")
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def _permission_status() -> tuple[bool, str]:
+    obj = _context_rpc("permission_status")
+    if not obj:
+        return False, "helper unavailable"
+    missing = obj.get("missing")
+    if isinstance(missing, list):
+        if not missing:
+            return True, "Accessibility, Input Monitoring, Microphone"
+        return (
+            False,
+            "missing: "
+            + ", ".join(str(item) for item in missing)
+            + ". Open Witzper menu settings for each missing permission, then quit and relaunch.",
+        )
+    granted = [
+        name
+        for key, name in (
+            ("accessibility", "Accessibility"),
+            ("input_monitoring", "Input Monitoring"),
+            ("microphone", "Microphone"),
+        )
+        if obj.get(key) is True
+    ]
+    if len(granted) == 3:
+        return True, ", ".join(granted)
+    return False, "incomplete permission response"
+
+
 def run_doctor() -> None:
     cfg = load_config()
     rows: list[tuple[str, str, str]] = []
@@ -83,6 +133,18 @@ def run_doctor() -> None:
             detail if ok else f"{detail} (text insertion will fail)",
         )
     )
+
+    ok, detail = _socket_accepts(STREAM_SOCKET)
+    rows.append(
+        _check(
+            "Dashboard stream socket",
+            ok,
+            detail if ok else f"{detail} (dashboard updates will not arrive)",
+        )
+    )
+
+    ok, detail = _permission_status()
+    rows.append(_check("macOS permissions", ok, detail))
 
     # Audio
     try:

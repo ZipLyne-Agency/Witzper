@@ -53,9 +53,13 @@ class Dictionary:
         self._conn.commit()
 
     def add_replacement(self, wrong: str, right: str) -> None:
+        wrong = wrong.strip()
+        right = right.strip()
+        if not wrong or not right:
+            return
         self._conn.execute(
             "INSERT OR REPLACE INTO replacement(wrong, right) VALUES (?, ?)",
-            (wrong.strip(), right.strip()),
+            (wrong, right),
         )
         self._conn.commit()
 
@@ -67,7 +71,7 @@ class Dictionary:
 
     def apply_replacements(self, text: str) -> str:
         out = text
-        for wrong, right in self.replacements():
+        for wrong, right in sorted(self.replacements(), key=lambda r: -len(r[0])):
             # Case-insensitive whole-word replacement that preserves surrounding punctuation
             pattern = re.compile(rf"\b{re.escape(wrong)}\b", re.IGNORECASE)
             out = pattern.sub(right, out)

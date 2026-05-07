@@ -12,6 +12,8 @@ scripts/download_models.sh.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from flow.models.asr_base import ASRResult
@@ -50,3 +52,9 @@ class Qwen3ASR:
             alternatives=[a.strip() for a in getattr(out, "alternatives", [])],
             language=getattr(out, "language", None),
         )
+
+    def supports_streaming(self) -> bool:
+        return False
+
+    def open_stream(self) -> Any:
+        raise RuntimeError("Qwen3-ASR backend does not support streaming")

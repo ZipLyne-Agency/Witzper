@@ -258,7 +258,7 @@ enum Updater {
 
     private static func promptInstall(current: String, available: String) async -> Bool {
         await MainActor.run {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             let alert = NSAlert()
             alert.messageText = "Witzper \(available) is available"
             alert.informativeText = """
@@ -273,7 +273,7 @@ enum Updater {
     }
 
     private static func showInfo(title: String, body: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body
@@ -282,7 +282,7 @@ enum Updater {
     }
 
     private static func showError(error: Error) {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Update failed"
@@ -325,7 +325,7 @@ final class ProgressWindow {
     }
 
     func show() {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
 

@@ -8,9 +8,10 @@ key = "fn"
 toggle_mode = false
 
 # Per-action shortcut bindings. Each action gets its own key.
-# `key` accepts a single key ("fn", "right_option", "right_cmd",
-# "right_shift", "caps_lock") or a chord like "right_cmd+right_option".
-# `mode` is "hold" (push-to-talk) or "tap" (single-press toggle).
+# `key` accepts a typed character ("a", "1", ";"), standalone key ("fn",
+# "space", "escape", "f5"), modifier ("right_option", "right_cmd",
+# "right_shift", "caps_lock"), or modifier chord ("right_cmd+right_option").
+# `mode` is currently "hold" (push-to-talk).
 # Set key = "" to disable an action.
 [hotkeys.dictate]
 key = "fn"
@@ -95,16 +96,18 @@ restore_clipboard_after_ms = 200
 auto_add_to_dictionary = true
 # Edit-watch window after insertion
 edit_watch_window_seconds = 10
-# Nightly LoRA fine-tune of cleanup model
-cleanup_lora_enabled = true
+# Cleanup LoRA can be run manually with `flow train cleanup`. It is not
+# scheduled or auto-applied by the app yet, so keep it disabled by default.
+cleanup_lora_enabled = false
 cleanup_lora_rank = 16
 cleanup_lora_schedule_cron = "0 3 * * *"
-# Biweekly LoRA fine-tune of ASR model on user audio+corrections
-asr_lora_enabled = true
+# ASR LoRA export is scaffolded, but trainer integration depends on the
+# Qwen3-ASR MLX port. Keep disabled until that trainer is available.
+asr_lora_enabled = false
 asr_lora_rank = 8
 asr_lora_schedule_cron = "0 4 */14 * *"
-# DSPy prompt optimization
-dspy_enabled = true
+# DSPy prompt optimization is experimental and not scheduled by default.
+dspy_enabled = false
 
 [ui]
 menu_bar_icon = true

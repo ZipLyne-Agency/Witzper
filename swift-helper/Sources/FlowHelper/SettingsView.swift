@@ -81,7 +81,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     shortcutCaptureRow(action: "dictate", label: "DICTATE")
                     shortcutCaptureRow(action: "command", label: "COMMAND MODE")
-                    Text("CLICK THE PILL THEN PRESS YOUR KEY · CHANGES TAKE EFFECT AFTER RESTART DAEMON BELOW")
+                    Text("CLICK THE PILL THEN PRESS YOUR KEY · RESTART WITZPER TO APPLY SHORTCUT CHANGES")
                         .font(.bbSmall).foregroundColor(.bbDim)
                         .padding(.top, 4)
                 }
@@ -178,28 +178,15 @@ struct SettingsView: View {
     }
 
     private func loadConfig() {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/Witzper/config.toml")
-        guard let txt = try? String(contentsOf: path, encoding: .utf8) else { return }
-        var hotkey = ""
-        var mic = ""
-        for raw in txt.components(separatedBy: "\n") {
-            let s = raw.trimmingCharacters(in: .whitespaces)
-            if s.hasPrefix("key") {
-                if let q1 = s.firstIndex(of: "\""), let q2 = s.lastIndex(of: "\""), q1 != q2 {
-                    hotkey = String(s[s.index(after: q1)..<q2])
-                }
-            } else if s.hasPrefix("device") {
-                if let q1 = s.firstIndex(of: "\""), let q2 = s.lastIndex(of: "\""), q1 != q2 {
-                    mic = String(s[s.index(after: q1)..<q2])
-                }
-            }
-        }
+        let hotkey = UserConfigWriter.read(section: "hotkeys.dictate", key: "key")
+            ?? UserConfigWriter.read(section: "hotkey", key: "key")
+            ?? ""
+        let mic = UserConfigWriter.read(section: "audio", key: "device") ?? ""
         if !hotkey.isEmpty { configValues["hotkey"] = hotkey }
         if !mic.isEmpty { configValues["mic"] = mic }
 
         // Read current model selections from default + user config
-        currentCleanupId = readModelFromConfig(section: "cleanup") ?? "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+        currentCleanupId = readModelFromConfig(section: "cleanup") ?? "mlx-community/Qwen3-8B-4bit"
         currentAsrId = readModelFromConfig(section: "asr.speed") ?? "mlx-community/parakeet-tdt-0.6b-v3"
 
         // Load existing per-action shortcuts. Falls back to defaults that
@@ -283,12 +270,18 @@ struct SettingsView: View {
            let val = parseModel(txt: txt, section: section) {
             return val
         }
-        // Fall back to default config
-        let defaultPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Witzper/configs/default.toml")
-        if let txt = try? String(contentsOf: defaultPath, encoding: .utf8),
-           let val = parseModel(txt: txt, section: section) {
-            return val
+        // Fall back to the bundled default config, then the source-tree path
+        // for local development builds.
+        let bundledDefaultPath = (Bundle.main.resourcePath ?? "")
+            + "/configs/default.toml"
+        let sourceDefaultPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Witzper/configs/default.toml").path
+        for defaultPath in [bundledDefaultPath, sourceDefaultPath] {
+            guard !defaultPath.isEmpty else { continue }
+            if let txt = try? String(contentsOfFile: defaultPath, encoding: .utf8),
+               let val = parseModel(txt: txt, section: section) {
+                return val
+            }
         }
         return nil
     }
@@ -310,24 +303,6 @@ struct SettingsView: View {
     }
 
     private func restartDaemon() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        // Kill by absolute repo path so the native launcher is matched
-        // regardless of argv[0] ("./Witzper", "Witzper", with/without flags).
-        // The /Applications menu-bar helper lives under a different prefix
-        // and is deliberately not matched.
-        let script = """
-        cd \(home)/Witzper && source .venv/bin/activate && \
-        pkill -9 -f '(python.*-m flow run|/bin/flow run)' ; pkill -9 -f '\(home)/Witzper/Witzper' ; sleep 1 ; \
-        rm -f /tmp/Witzper.pid ; \
-        if [[ -x ./Witzper ]]; then \
-          PATH=/opt/homebrew/bin:$PATH nohup ./Witzper --verbose > /tmp/flow-daemon.log 2>&1 & \
-        else \
-          PATH=/opt/homebrew/bin:$PATH nohup python -u -m flow run --verbose > /tmp/flow-daemon.log 2>&1 & \
-        fi
-        """
-        let p = Process()
-        p.launchPath = "/bin/zsh"
-        p.arguments = ["-c", script]
-        try? p.run()
+        (NSApp.delegate as? AppDelegate)?.restartPythonDaemon()
     }
 }

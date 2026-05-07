@@ -16,6 +16,7 @@
 import Cocoa
 import ApplicationServices
 import AVFoundation
+import Darwin
 import Foundation
 
 // MARK: - Hotkey spec
@@ -125,6 +126,7 @@ final class UnixSocketServer {
     }
 
     func broadcast(_ json: String) {
+        pruneDeadClients()
         var line = json
         if !line.hasSuffix("\n") { line += "\n" }
         let bytes = [UInt8](line.utf8)
@@ -135,6 +137,37 @@ final class UnixSocketServer {
         for fd in snapshot {
             let n = bytes.withUnsafeBufferPointer { send(fd, $0.baseAddress, $0.count, 0) }
             if n < 0 { dead.append(fd); close(fd) }
+        }
+        if !dead.isEmpty {
+            clientsLock.lock()
+            clients.removeAll { dead.contains($0) }
+            clientsLock.unlock()
+        }
+    }
+
+    func clientCount() -> Int {
+        pruneDeadClients()
+        clientsLock.lock()
+        let count = clients.count
+        clientsLock.unlock()
+        return count
+    }
+
+    private func pruneDeadClients() {
+        clientsLock.lock()
+        let snapshot = clients
+        clientsLock.unlock()
+        var dead: [Int32] = []
+        for fd in snapshot {
+            var byte = UInt8(0)
+            let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+            if n == 0 {
+                dead.append(fd)
+                close(fd)
+            } else if n < 0 && errno != EAGAIN && errno != EWOULDBLOCK {
+                dead.append(fd)
+                close(fd)
+            }
         }
         if !dead.isEmpty {
             clientsLock.lock()
@@ -233,18 +266,28 @@ final class StreamListener {
 /// Two kinds of triggers:
 ///   .modifier — satisfied when a set of modifier flag bits are all high
 ///               (fn, right_cmd, chords like right_cmd+right_option).
-///   .key      — satisfied when a raw keycode (F5, F6, space, escape, …)
+///   .key      — satisfied when a raw keycode (letters, digits, F5, space, …)
 ///               is held. Tracked via keyDown/keyUp, autorepeat ignored.
 enum HotkeyTrigger {
     case modifier(CGEventFlags)
     case key(Int64)
 }
 
-/// Non-modifier virtual keycode table — enough to cover "pick any key you
-/// want" for push-to-talk. Names are lowercase, matching the config format.
-/// Keys that normally type characters (letters, digits) are deliberately
-/// excluded — they'd make the hotkey unusable for typing. Function keys,
-/// arrows, and the "standalone" keys (space/escape/return/tab) are fine.
+/// Printable virtual keycode table. Names are lowercase, matching the config
+/// format written by HotkeyCaptureField.
+let printableKeycodes: [String: Int64] = [
+    "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5,
+    "z": 6, "x": 7, "c": 8, "v": 9, "b": 11,
+    "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+    "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
+    "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
+    "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
+    "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
+    ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50,
+]
+
+/// Non-modifier virtual keycode table. Names are lowercase, matching the
+/// config format.
 let nonModifierKeycodes: [String: Int64] = [
     "f1": 122, "f2": 120, "f3": 99, "f4": 118,
     "f5": 96,  "f6": 97,  "f7": 98, "f8": 100,
@@ -274,12 +317,16 @@ struct HotkeyBinding {
 }
 
 /// Parse a hotkey name into a trigger. Modifier chords (`"right_cmd+right_option"`)
-/// become `.modifier`, single non-modifier keys (`"f5"`, `"space"`) become
-/// `.key`. Mixing modifiers and non-modifiers isn't supported yet.
+/// become `.modifier`, single character/non-modifier keys (`"a"`, `"f5"`,
+/// `"space"`) become `.key`. Mixing modifiers and non-modifiers isn't
+/// supported yet.
 func parseHotkeyTrigger(_ name: String) -> HotkeyTrigger? {
     let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
     if trimmed.isEmpty { return nil }
     // Non-modifier single key (no chord form supported yet).
+    if !trimmed.contains("+"), let kc = printableKeycodes[trimmed] {
+        return .key(kc)
+    }
     if !trimmed.contains("+"), let kc = nonModifierKeycodes[trimmed] {
         return .key(kc)
     }
@@ -344,7 +391,8 @@ final class HotkeyTap {
             callback: { _, type, event, refcon in
                 guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
                 let this = Unmanaged<HotkeyTap>.fromOpaque(refcon).takeUnretainedValue()
-                this.handle(type: type, event: event)
+                let consumed = this.handle(type: type, event: event)
+                if consumed { return nil }
                 return Unmanaged.passUnretained(event)
             },
             userInfo: selfPtr
@@ -360,14 +408,18 @@ final class HotkeyTap {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    private func handle(type: CGEventType, event: CGEvent) {
+    private func handle(type: CGEventType, event: CGEvent) -> Bool {
         // Non-modifier key bindings are driven by keyDown / keyUp.
         if type == .keyDown || type == .keyUp {
             let keycode = event.getIntegerValueField(.keyboardEventKeycode)
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if isRepeat { return }
+            if isRepeat {
+                return bindings.contains { $0.keycode == keycode }
+            }
+            var matched = false
             for i in bindings.indices {
                 guard let kc = bindings[i].keycode, kc == keycode else { continue }
+                matched = true
                 if type == .keyDown && !bindings[i].isDown {
                     bindings[i].isDown = true
                     onDown(bindings[i].action)
@@ -376,9 +428,9 @@ final class HotkeyTap {
                     onUp(bindings[i].action)
                 }
             }
-            return
+            return matched
         }
-        guard type == .flagsChanged else { return }
+        guard type == .flagsChanged else { return false }
         let flags = event.flags
 
         // 1. Determine which modifier bindings are physically satisfied.
@@ -435,6 +487,7 @@ final class HotkeyTap {
                 }
             }
         }
+        return false
     }
 }
 
@@ -697,6 +750,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start servers
         let hotkeyServer = UnixSocketServer(path: "/tmp/Witzper.sock", queueLabel: "flow.hotkey")
         hotkeyServer.start()
+        self.retainedHotkeyServer = hotkeyServer
 
         // Listen to the daemon's event stream for live partial transcripts.
         let listener = StreamListener()
@@ -706,8 +760,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextServer.start(requestHandler: { req in
             // Ops:
             //   snapshot           — default; full AX context for the focused app
-            //   insert             — paste text via clipboard + ⌘V
+            //   insert             — insert text using paste or synthetic typing
             //   read_focused_text  — full AXValue of the focused field
+            //   simulate_hotkey    — test-only local RPC used by live E2E to
+            //                        drive the packaged daemon's real
+            //                        recording path without physical keypresses
+            //   daemon_status      — reports whether the Python daemon is
+            //                        connected to the helper's hotkey stream
             //   get_selection      — selected text in the focused field
             //                        (used by Command Mode to grab the user's
             //                        highlighted source text). Also caches
@@ -719,8 +778,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let op = obj["op"] as? String {
                 if op == "insert", let text = obj["text"] as? String {
-                    Inserter.paste(text: text)
+                    let status = Permissions.current()
+                    if !status.accessibility {
+                        let payload: [String: Any] = [
+                            "ok": false,
+                            "error": "accessibility_missing",
+                            "missing": status.missing,
+                        ]
+                        if let data = try? JSONSerialization.data(withJSONObject: payload),
+                           let s = String(data: data, encoding: .utf8) {
+                            return s
+                        }
+                        return "{\"ok\":false,\"error\":\"accessibility_missing\"}"
+                    }
+                    let strategy = (obj["strategy"] as? String) ?? "paste"
+                    let restoreMS = (obj["restore_clipboard_after_ms"] as? Int) ?? 200
+                    Inserter.insert(
+                        text: text,
+                        strategy: strategy,
+                        restoreClipboardAfterMS: restoreMS
+                    )
                     return "{\"ok\":true}"
+                }
+                if op == "permission_status" {
+                    let status = Permissions.current()
+                    let payload: [String: Any] = [
+                        "accessibility": status.accessibility,
+                        "input_monitoring": status.inputMonitoring,
+                        "microphone": status.microphone,
+                        "missing": status.missing,
+                    ]
+                    if let data = try? JSONSerialization.data(withJSONObject: payload),
+                       let s = String(data: data, encoding: .utf8) {
+                        return s
+                    }
+                    return "{\"error\":\"permission_status_encode_failed\"}"
+                }
+                if op == "simulate_hotkey" {
+                    let action = (obj["action"] as? String) ?? "dictate"
+                    guard action == "dictate" else {
+                        return "{\"ok\":false,\"error\":\"unsupported_action\"}"
+                    }
+                    let status = Permissions.current()
+                    if !status.allGranted {
+                        let payload: [String: Any] = [
+                            "ok": false,
+                            "error": "permission_missing",
+                            "missing": status.missing,
+                        ]
+                        if let data = try? JSONSerialization.data(withJSONObject: payload),
+                           let s = String(data: data, encoding: .utf8) {
+                            return s
+                        }
+                        return "{\"ok\":false,\"error\":\"permission_missing\"}"
+                    }
+                    let phase = (obj["phase"] as? String) ?? ""
+                    guard phase == "down" || phase == "up" else {
+                        return "{\"ok\":false,\"error\":\"invalid_phase\"}"
+                    }
+                    let type = phase == "down" ? "hotkey_down" : "hotkey_up"
+                    let payload: [String: Any] = ["type": type, "action": action]
+                    if let data = try? JSONSerialization.data(withJSONObject: payload),
+                       let line = String(data: data, encoding: .utf8) {
+                        hotkeyServer.broadcast(line)
+                        return "{\"ok\":true}"
+                    }
+                    return "{\"ok\":false,\"error\":\"simulate_hotkey_encode_failed\"}"
+                }
+                if op == "daemon_status" {
+                    let payload: [String: Any] = [
+                        "ok": true,
+                        "hotkey_clients": hotkeyServer.clientCount(),
+                    ]
+                    if let data = try? JSONSerialization.data(withJSONObject: payload),
+                       let s = String(data: data, encoding: .utf8) {
+                        return s
+                    }
+                    return "{\"ok\":false,\"error\":\"daemon_status_encode_failed\"}"
                 }
                 if op == "read_focused_text" {
                     let text = readFocusedTextFull() ?? ""
@@ -841,10 +975,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var retainedTap: HotkeyTap?
     var retainedListener: StreamListener?
+    var retainedHotkeyServer: UnixSocketServer?
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopPythonDaemon()
         unlink("/tmp/Witzper.sock")
         unlink("/tmp/flow-context.sock")
+        unlink("/tmp/flow-stream.sock")
     }
 
     func installMainMenu() {
@@ -1048,10 +1185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "Microphone set to: \(name)"
         alert.informativeText = "Restarting daemon for change to take effect."
         alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         alert.runModal()
-        // Restart Python daemon via launchctl-style: just kill it; user's run.sh will restart
-        // For now, ask user to restart manually
         restartPythonDaemon()
     }
 
@@ -1162,6 +1297,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "Witzper: failed to spawn daemon: \(error)\n".data(using: .utf8)!
             )
         }
+        cleanupBundlePythonCaches()
+    }
+
+    func cleanupBundlePythonCaches() {
+        guard let resources = Bundle.main.resourcePath else { return }
+        let root = URL(fileURLWithPath: resources)
+        guard root.path.contains(".app/Contents/Resources") else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 12.0) {
+            let fm = FileManager.default
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                return
+            }
+            for case let url as URL in enumerator {
+                let name = url.lastPathComponent
+                if name == "__pycache__" {
+                    try? fm.removeItem(at: url)
+                    continue
+                }
+                if url.pathExtension == "pyc" {
+                    try? fm.removeItem(at: url)
+                }
+            }
+        }
     }
 
     /// Build the zsh one-liner that launches the flow daemon. Shared by
@@ -1183,6 +1345,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bundledPyPath = resources
         return """
         export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH
+        export PYTHONDONTWRITEBYTECODE=1
+        export PYTHONPYCACHEPREFIX=/tmp/witzper-pycache
         if [[ -x '\(bundledPython)' ]]; then
           # Shipped path: bundled python-build-standalone + deps.
           # PYTHONPATH puts Resources/flow (with its configs/ sibling) in
@@ -1206,19 +1370,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func restartPythonDaemon() {
-        // Kill any previous daemon instance. We match by:
-        //   1. `flow run`            — plain `python -m flow run …`
-        //   2. $HOME/Witzper/Witzper — native launcher, regardless of argv
-        //                              (old bug: matching "./Witzper" or
-        //                              "--verbose" missed the launcher once
-        //                              argv[0] became a bare "Witzper").
-        // The /Applications/Witzper.app menu-bar helper is deliberately
-        // excluded by using the absolute repo path — pkill -f won't match
-        // it.
+        stopPythonDaemon()
+        // Give macOS a beat to reap the processes before we spawn a replacement.
+        Thread.sleep(forTimeInterval: 0.3)
+        // Spawn new daemon using the same bundled-first resolution order.
+        let spawn = Process()
+        spawn.launchPath = "/bin/zsh"
+        spawn.arguments = ["-c", buildDaemonLaunchScript()]
+        try? spawn.run()
+    }
+
+    func stopPythonDaemon() {
+        if let pidText = try? String(contentsOfFile: "/tmp/Witzper.pid"),
+           let pid = Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            if kill(pid, SIGTERM) == 0 {
+                for _ in 0..<10 {
+                    if kill(pid, 0) != 0 { break }
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                if kill(pid, 0) == 0 {
+                    _ = kill(pid, SIGKILL)
+                }
+            }
+        }
+
+        // Safety net for older launches that predate the pid-file cleanup.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        // Narrow patterns to avoid matching anything with "workflow run" in
-        // its cmdline (gh CLI, GitHub Actions shells, etc.) — see
-        // ensureDaemonRunning() for the long-form explanation.
         for pattern in [
             "(python.*-m flow run|/bin/flow run)",
             "\(home)/Witzper/Witzper",
@@ -1229,13 +1406,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? k.run()
             k.waitUntilExit()
         }
-        // Give macOS a beat to reap the processes before we spawn a replacement.
-        Thread.sleep(forTimeInterval: 0.3)
-        // Spawn new daemon using the same bundled-first resolution order.
-        let spawn = Process()
-        spawn.launchPath = "/bin/zsh"
-        spawn.arguments = ["-c", buildDaemonLaunchScript()]
-        try? spawn.run()
+
+        unlink("/tmp/Witzper.pid")
+        unlink("/tmp/flow-stream.sock")
     }
 
     @objc func menuRestartDaemon() {
@@ -1250,6 +1423,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DashboardWindowController.shared.showDashboard()
     }
 
+    func manualDictationStart() {
+        let status = Permissions.current()
+        guard status.accessibility && status.microphone else {
+            showManualDictationPermissionAlert(status)
+            return
+        }
+        broadcastDictationEvent(type: "hotkey_down")
+        Sounds.playStart()
+        updateIcon(listening: true, action: "dictate")
+    }
+
+    func manualDictationStop() {
+        broadcastDictationEvent(type: "hotkey_up")
+        Sounds.playStop()
+        updateIcon(listening: false, action: "dictate")
+    }
+
+    private func broadcastDictationEvent(type: String) {
+        let payload: [String: Any] = ["type": type, "action": "dictate"]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        retainedHotkeyServer?.broadcast(line)
+    }
+
+    private func showManualDictationPermissionAlert(_ status: PermissionStatus) {
+        let missing = [
+            status.accessibility ? nil : "Accessibility",
+            status.microphone ? nil : "Microphone",
+        ].compactMap { $0 }.joined(separator: ", ")
+        let alert = NSAlert()
+        alert.messageText = "Manual dictation needs permission"
+        alert.informativeText = """
+            Missing: \(missing)
+
+            Manual recording does not need Input Monitoring, but Witzper still needs Microphone access to record and Accessibility access to insert the transcript.
+            """
+        alert.addButton(withTitle: "OK")
+        NSApp.activate()
+        alert.runModal()
+    }
+
     @objc func runTest() {
         Sounds.playStart()
         updateIcon(listening: true)
@@ -1260,7 +1476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showDiagnostics() {
-        let trusted = AXIsProcessTrustedWithOptions(nil)
+        let permissions = Permissions.current()
         let alert = NSAlert()
         alert.messageText = "Witzper diagnostics"
         let mic: String
@@ -1274,20 +1490,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let activeHotkey = HotkeyName.label(
             for: UserConfigWriter.read(section: "hotkeys.dictate", key: "key") ?? hotkey.rawValue
         )
+        let missing = permissions.missing.isEmpty ? "none" : permissions.missing.joined(separator: ", ")
         alert.informativeText = """
-            Accessibility (hotkey + AX context): \(trusted ? "✅ granted" : "❌ NOT GRANTED")
+            Accessibility (hotkey + AX context): \(permissions.accessibility ? "✅ granted" : "❌ NOT GRANTED")
+            Input Monitoring (global hotkey): \(permissions.inputMonitoring ? "✅ granted" : "❌ NOT GRANTED")
             Microphone: \(mic)
             Hotkey: \(activeHotkey)
-            Sockets: /tmp/Witzper.sock, /tmp/flow-context.sock
+            Sockets: /tmp/Witzper.sock, /tmp/flow-context.sock, /tmp/flow-stream.sock
+            Missing permissions: \(missing)
 
-            If Accessibility is not granted, the hotkey will silently do nothing.
-            Use the menu to open settings and toggle Witzper on, then quit and relaunch this app.
+            If any permission is missing, dictation cannot pass live end-to-end testing.
+            Use the menu to open each missing settings pane, toggle Witzper on, then quit and relaunch this app.
             """
         alert.addButton(withTitle: "Request Microphone Now")
         alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if alert.runModal() == .alertFirstButtonReturn {
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            Permissions.requestMicrophone { _ in }
         }
     }
 
@@ -1361,33 +1580,33 @@ func loadHotkeyBindings(legacyFallback: Hotkey) -> [HotkeyBinding] {
     var out: [HotkeyBinding] = []
     let sections = readUserConfigSections()
 
-    // Pull every [hotkeys.<action>] section.
-    var found = false
-    for (name, kv) in sections where name.hasPrefix("hotkeys.") {
-        found = true
-        let action = String(name.dropFirst("hotkeys.".count))
-        guard let key = kv["key"], !key.isEmpty,
-              let trig = parseHotkeyTrigger(key) else { continue }
+    func appendBinding(action: String, key: String) {
+        guard !key.isEmpty, let trig = parseHotkeyTrigger(key) else { return }
         out.append(HotkeyBinding(action: action, rawKey: key, trigger: trig))
     }
-    if !found {
+
+    // Pull every [hotkeys.<action>] section, then fill any missing built-in
+    // actions from defaults so partial user config behaves like Python's
+    // merged config loader.
+    var foundActions = Set<String>()
+    for (name, kv) in sections where name.hasPrefix("hotkeys.") {
+        let action = String(name.dropFirst("hotkeys.".count))
+        guard let key = kv["key"], !key.isEmpty else { continue }
+        appendBinding(action: action, key: key)
+        foundActions.insert(action)
+    }
+
+    if !foundActions.contains("dictate") {
         let dictateKey: String
         if let kv = sections["hotkey"], let k = kv["key"], !k.isEmpty {
             dictateKey = k
         } else {
             dictateKey = legacyFallback.rawValue
         }
-        if let trig = parseHotkeyTrigger(dictateKey) {
-            out.append(HotkeyBinding(
-                action: "dictate", rawKey: dictateKey, trigger: trig
-            ))
-        }
-        let chord = "right_cmd+right_option"
-        if let trig = parseHotkeyTrigger(chord) {
-            out.append(HotkeyBinding(
-                action: "command", rawKey: chord, trigger: trig
-            ))
-        }
+        appendBinding(action: "dictate", key: dictateKey)
+    }
+    if !foundActions.contains("command") {
+        appendBinding(action: "command", key: "right_cmd+right_option")
     }
     return out
 }
@@ -1402,7 +1621,7 @@ enum CommandResultPanel {
     static var lastSourcePID: pid_t = 0
 
     static func show(instruction: String, result: String, hadSelection: Bool) {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let alert = NSAlert()
         alert.messageText = "Command: \(instruction)"
         // NSAlert truncates long bodies; cap so the panel stays usable.
@@ -1432,7 +1651,7 @@ enum CommandResultPanel {
     private static func replaceSelection(with text: String) {
         if lastSourcePID != 0,
            let app = NSRunningApplication(processIdentifier: lastSourcePID) {
-            app.activate(options: .activateIgnoringOtherApps)
+            app.activate()
             // Give the activation ~150ms to land before we touch AX/paste.
             Thread.sleep(forTimeInterval: 0.15)
             let axApp = AXUIElementCreateApplication(lastSourcePID)

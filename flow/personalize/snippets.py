@@ -103,7 +103,10 @@ class SnippetStore:
         # words (e.g. "my sig" → "My, sig." → still fires). Each gap between
         # tokens is allowed to match [\s.,;:!?-]+.
         out = text
-        for s in sorted(snippets, key=lambda x: -len(x.trigger)):
+        def sort_key(snippet: Snippet) -> int:
+            return -len(snippet.trigger)
+
+        for s in sorted(snippets, key=sort_key):
             tokens = s.trigger.split()
             if len(tokens) > 1:
                 gap = r"[\s.,;:!?\-]+"
@@ -111,5 +114,9 @@ class SnippetStore:
                 pattern = re.compile(rf"(?<!\w){inner}(?!\w)", re.IGNORECASE)
             else:
                 pattern = re.compile(rf"\b{re.escape(s.trigger)}\b", re.IGNORECASE)
-            out = pattern.sub(lambda _m, exp=s.expansion: exp, out)
+
+            def replace(_match: re.Match[str], expansion: str = s.expansion) -> str:
+                return expansion
+
+            out = pattern.sub(replace, out)
         return out

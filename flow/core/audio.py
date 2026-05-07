@@ -6,8 +6,9 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import sounddevice as sd
@@ -40,7 +41,7 @@ class AudioCapture:
         self._concat_cache: np.ndarray = np.zeros(0, dtype=np.float32)
         self._concat_frames_count: int = 0
         # Max-duration auto-stop callback (set by caller via on_max_reached).
-        self._on_max_reached: callable | None = None
+        self._on_max_reached: Callable[[], None] | None = None
         self._max_timer: threading.Timer | None = None
         # Crash-recovery: periodic WAV flush while recording.
         self._recovery_path: Path | None = None
@@ -84,7 +85,7 @@ class AudioCapture:
         except Exception as e:  # noqa: BLE001
             print(f"[flow] mic warmup failed: {e}")
 
-    def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ARG002
+    def _callback(self, indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:  # noqa: ARG002
         if status:
             # Under-run / over-run; ignore for now, log in verbose mode.
             pass
@@ -105,7 +106,7 @@ class AudioCapture:
                 old = self._preroll_frames.pop(0)
                 self._preroll_samples -= int(old.shape[0])
 
-    def _resolve_device(self):
+    def _resolve_device(self) -> int | None:
         """Map cfg.audio.device (string name or 'default') to a sounddevice index."""
         name = (self.cfg.device or "default").strip()
         if name.lower() in ("default", "system default", ""):
@@ -142,7 +143,7 @@ class AudioCapture:
         )
         self._stream.start()
 
-    def set_on_max_reached(self, callback: callable) -> None:
+    def set_on_max_reached(self, callback: Callable[[], None]) -> None:
         """Register a callback invoked (from a timer thread) when max_seconds
         is reached. The orchestrator uses this to trigger the same pipeline
         that a normal key-up would."""

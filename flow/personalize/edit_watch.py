@@ -14,6 +14,7 @@ The actual AXValue read is done by the Swift helper via the
 from __future__ import annotations
 
 import difflib
+import re
 import threading
 import time
 
@@ -146,14 +147,16 @@ class EditWatcher:
         after_tokens = after.split()
         if len(before_tokens) != len(after_tokens):
             return
+        changed = [(b, a) for b, a in zip(before_tokens, after_tokens, strict=False) if b != a]
+        if len(changed) != 1:
+            return
         raw_lower = raw_transcript.lower()
-        for b, a in zip(before_tokens, after_tokens, strict=False):
-            if b == a:
-                continue
-            # Only learn if the pre-edit token was in the raw ASR output —
-            # that confirms it was a mishearing, not something the user typed.
-            if b.strip(".,!?;:").lower() not in raw_lower:
-                continue
-            dist = Levenshtein.distance(b.lower(), a.lower())
-            if dist <= 2 or b.lower() == a.lower():
-                self.dictionary.add_boost(a.strip(".,!?;:"))
+        b, a = changed[0]
+        # Only learn if the pre-edit token was in the raw ASR output —
+        # that confirms it was a mishearing, not something the user typed.
+        before_word = b.strip(".,!?;:")
+        if not re.search(rf"\b{re.escape(before_word.lower())}\b", raw_lower):
+            return
+        dist = Levenshtein.distance(b.lower(), a.lower())
+        if dist <= 2 or b.lower() == a.lower():
+            self.dictionary.add_boost(a.strip(".,!?;:"))

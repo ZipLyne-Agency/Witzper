@@ -134,6 +134,7 @@ int main(int argc, char **argv) {
         // sys.prefix / site-packages resolution lands on the venv.
         NSString *venvPython = [venvBin stringByAppendingPathComponent:@"python"];
         setenv("PYTHONEXECUTABLE", venvPython.UTF8String, 1);
+        setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
 
         // Build new argv: [self, -m, flow, run, ...passthrough]
         int newArgc = argc + 3;

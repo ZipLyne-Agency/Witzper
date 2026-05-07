@@ -73,11 +73,29 @@ if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
     exit 2
 fi
 
-echo "→ bumping VERSION to ${VERSION}"
+echo "→ bumping VERSION and pyproject.toml to ${VERSION}"
 echo "${VERSION}" > VERSION
+python3 - "$VERSION" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+version = sys.argv[1]
+path = Path("pyproject.toml")
+text = path.read_text()
+text, count = re.subn(
+    r'(?m)^version = "[^"]+"$',
+    f'version = "{version}"',
+    text,
+    count=1,
+)
+if count != 1:
+    raise SystemExit("ERROR: could not update pyproject.toml version")
+path.write_text(text)
+PY
 
 echo "→ committing"
-git add VERSION
+git add VERSION pyproject.toml
 # Use FLOW_SKIP_REBUILD so the post-commit hook doesn't fire — the release
 # workflow on GitHub will produce the official artifact.
 FLOW_SKIP_REBUILD=1 git commit -m "release: v${VERSION}"

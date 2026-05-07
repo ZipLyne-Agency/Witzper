@@ -60,3 +60,36 @@ def test_passthrough_off_by_default_for_long_utterance() -> None:
         few_shots=[],
     )
     assert result == "Hello world, this is the cleaned version."
+
+
+def test_deterministic_cleanup_removes_common_fillers_left_by_llm() -> None:
+    llm = _mk("Um hello, so this is a test. Uh today is great.")
+
+    result = llm.clean(
+        raw_transcript="um hello so this is a test uh today is great",
+        few_shots=[],
+    )
+
+    assert result == "Hello, so this is a test. Today is great."
+
+
+def test_deterministic_cleanup_removes_punctuated_fillers() -> None:
+    llm = _mk("Um, hello. Uh, today is great.")
+
+    result = llm.clean(
+        raw_transcript="um hello uh today is great",
+        few_shots=[],
+    )
+
+    assert result == "Hello. Today is great."
+
+
+def test_deterministic_cleanup_preserves_er_as_meaningful_token() -> None:
+    llm = _mk("Go to the ER now.")
+
+    result = llm.clean(
+        raw_transcript="go to the ER now",
+        few_shots=[],
+    )
+
+    assert result == "Go to the ER now."
