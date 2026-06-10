@@ -1,7 +1,7 @@
 name: release
 
-# Every push to main ships a signed, notarized release, refreshes latest.json
-# (read by the in-app Updater) and bumps the Homebrew cask. Version =
+# Every push to main ships a signed, notarized release and refreshes
+# latest.json (read by the in-app Updater). Version =
 # "<VERSION file MAJOR.MINOR>.<commit count>" — deterministic, no bump
 # commits, no manual tagging.
 on:
@@ -130,63 +130,9 @@ jobs:
             --title "Witzper ${VERSION}" \
             --notes "Signed & notarized by Apple. In-app auto-update (signature-verified).
 
-          **Install:** \`brew install ziplyne-agency/witzper/witzper\` — or download \`${ZIP_NAME}\`, unzip, drag **Witzper.app** to Applications.
+          **Install:** download \`${ZIP_NAME}\`, unzip, drag **Witzper.app** to Applications.
 
           **Updating from 0.2.x?** The app's code signature changed from ad-hoc to Developer ID, so macOS treats it as new: re-grant **Microphone**, **Accessibility** and **Input Monitoring** in System Settings → Privacy & Security after the update." \
             --latest \
             "${ZIP_NAME}" \
             "latest.json"
-
-      # ----------------------------------------------------------------------
-      # Auto-update the Homebrew tap so `brew upgrade --cask witzper` picks
-      # up the new version without a human editing the formula. Gracefully
-      # skipped if HOMEBREW_TAP_TOKEN is not set.
-      #
-      # HOMEBREW_TAP_TOKEN requirements: a GitHub Personal Access Token with
-      # `Contents: write` on ZipLyne-Agency/homebrew-witzper.
-      # ----------------------------------------------------------------------
-      - name: Update Homebrew Cask
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${TAP_TOKEN}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN secret not set — skipping cask update."
-            exit 0
-          fi
-          echo "→ cloning homebrew-witzper tap"
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/ZipLyne-Agency/homebrew-witzper.git" tap
-          cd tap
-
-          echo "→ rewriting Casks/witzper.rb"
-          python3 - <<'PY'
-          import os, re, pathlib
-          path = pathlib.Path("Casks/witzper.rb")
-          text = path.read_text()
-          version = os.environ["VERSION"]
-          sha = os.environ["SHA256"]
-          text = re.sub(r'version\s+"[^"]+"', f'version "{version}"', text, count=1)
-          text = re.sub(r'sha256\s+"[0-9a-fA-F]+"', f'sha256 "{sha}"', text, count=1)
-          # Asset name is fixed ("Witzper.zip") as of the push-to-main release
-          # pipeline — rewrite the url template so old casks migrate atomically
-          # with the version/sha bump.
-          text = re.sub(
-              r'url\s+"https://github\.com/[^"]+"',
-              'url "https://github.com/ZipLyne-Agency/Witzper/releases/download/v#{version}/Witzper.zip"',
-              text, count=1)
-          path.write_text(text)
-          print(path.read_text())
-          PY
-
-          echo "→ committing + pushing"
-          git config user.name "witzper-release-bot"
-          git config user.email "witzper-release-bot@users.noreply.github.com"
-          git add Casks/witzper.rb
-          if git diff --cached --quiet; then
-            echo "no cask changes — skipping push"
-            exit 0
-          fi
-          git commit -m "witzper: bump to v${VERSION}"
-          git push origin HEAD:main

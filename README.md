@@ -56,31 +56,17 @@ The cost: you need a recent Apple Silicon Mac with enough unified memory for the
 
 ## 📦 Install
 
-Three ways to get Witzper running. Pick one.
+Two ways to get Witzper running. Pick one.
 
-### 1. Homebrew Cask (recommended)
+### 1. Download (recommended)
 
-One line. This is how most people should install Witzper.
+**[⬇ Download Witzper.zip](https://github.com/ZipLyne-Agency/Witzper/releases/latest/download/Witzper.zip)** — this link always points to the newest version. Unzip, drag **Witzper.app** into `/Applications`, and double-click it.
 
-```bash
-brew install --cask ZipLyne-Agency/witzper/witzper
-```
+No warnings, no extra steps: every release is **code-signed with a Developer ID and notarized by Apple**. After install, grant **Microphone**, **Accessibility**, and **Input Monitoring** under *System Settings → Privacy & Security*.
 
-Every release is **code-signed and notarized by Apple**, so it opens with no Gatekeeper friction. After install, open Witzper from `/Applications` and grant **Microphone**, **Accessibility**, and **Input Monitoring** under *System Settings → Privacy & Security*.
+You'll never need to come back here — Witzper updates itself in-app, and every update is verified (SHA-256 + code signature) before installing. See [🔄 Updating Witzper](#-updating-witzper).
 
-Upgrade later with:
-```bash
-brew upgrade --cask witzper
-```
-(Or use the in-app **Check for Updates…** menu item — see [🔄 Updating Witzper](#-updating-witzper).)
-
-### 2. Direct download from GitHub Releases
-
-**[⬇ Download Witzper.zip](https://github.com/ZipLyne-Agency/Witzper/releases/latest/download/Witzper.zip)** — this link always points to the newest version. Unzip and drag **Witzper.app** into `/Applications`, then double-click it.
-
-No warnings, no extra steps: every release is **code-signed with a Developer ID and notarized by Apple**, and in-app updates verify both a SHA-256 checksum and the code signature before installing.
-
-### 3. Build from source
+### 2. Build from source
 
 Useful if you want to hack on Witzper or verify the build yourself. Requires Homebrew, Python 3.13, Xcode command-line tools, and `uv`. Full instructions in [Quick start (build from source)](#-quick-start-build-from-source) below.
 
@@ -88,7 +74,7 @@ Useful if you want to hack on Witzper or verify the build yourself. Requires Hom
 
 ## 🚀 Quick start (build from source)
 
-> **For contributors and developers.** If you just want to use Witzper, see [📦 Install](#-install) above — `brew install --cask witzper` is the one-liner. The steps below are for building from source.
+> **For contributors and developers.** If you just want to use Witzper, see [📦 Install](#-install) above — the download link is all you need. The steps below are for building from source.
 
 ### Step 1 — Install the prerequisites (one time, ~5 minutes)
 
@@ -558,25 +544,19 @@ Witzper has a built-in updater. **You never need to visit GitHub to stay current
 
 - **Automatic**: every 24 hours when Witzper.app launches, it silently checks [github.com/ZipLyne-Agency/Witzper/releases/latest](https://github.com/ZipLyne-Agency/Witzper/releases/latest). If a newer version is available, a prompt appears asking to install it. One click, ~10 seconds, the app relaunches on the new version.
 - **Manual**: menu bar → **Check for Updates…** — forces a check right now, even if you just ran one. If you're already on the latest, it tells you so.
-- **Under the hood**: the updater fetches a `latest.json` manifest produced by GitHub Actions on each tagged release, downloads the `.zip` asset, verifies the SHA-256, replaces `/Applications/Witzper.app` (the old bundle is moved to the Trash, not deleted), and relaunches. Source: [`swift-helper/Sources/FlowHelper/Updater.swift`](swift-helper/Sources/FlowHelper/Updater.swift).
+- **Under the hood**: the updater fetches a `latest.json` manifest produced by GitHub Actions on each tagged release, downloads the `.zip` asset, verifies the SHA-256 **and the Developer ID code signature**, replaces `/Applications/Witzper.app` (the old bundle is moved to the Trash, not deleted), and relaunches. Source: [`swift-helper/Sources/FlowHelper/Updater.swift`](swift-helper/Sources/FlowHelper/Updater.swift).
 - **Opt out**: the silent check respects your privacy and never sends analytics. If you want to disable it entirely, remove the `Updater.checkSilently()` call from `main.swift` and rebuild.
 
 ### For developers: cutting a release
 
-Releases are tag-triggered. To ship a new version:
+Releases are **automatic**: every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds `Witzper.app`, signs every bundled binary with a Developer ID certificate (hardened runtime + timestamps), submits it to **Apple notarization**, staples the ticket, and publishes a GitHub Release containing:
 
-```bash
-scripts/release.sh patch
-```
-
-That script validates the current state, bumps [`VERSION`](VERSION) and `pyproject.toml`, commits, creates an annotated version tag, and pushes everything. The push triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which on a `macos-14` runner builds `Witzper.app` in release mode, zips it with `ditto`, builds a DMG, computes SHA-256 checksums, and creates a GitHub Release containing:
-
-- `Witzper-X.Y.Z.zip` — the downloadable app bundle.
-- `Witzper-X.Y.Z.dmg` — the drag-to-install disk image.
+- `Witzper.zip` — the downloadable app bundle (fixed name, so the [latest link](https://github.com/ZipLyne-Agency/Witzper/releases/latest/download/Witzper.zip) never changes).
 - `latest.json` — the manifest the in-app Updater reads.
-- Auto-generated release notes from the commits since the last tag.
 
-Users who already have Witzper installed see the update within 24 hours (or instantly via Check for Updates). There's no App Store, no notarization, no Sparkle appcast to maintain. Just tag and push.
+The version is `<VERSION file MAJOR.MINOR>.<commit count>` — no tags or bump commits to manage. To start a new minor/major series, run `scripts/release.sh minor|major` and push.
+
+Users who already have Witzper installed see the update within 24 hours (or instantly via Check for Updates).
 
 ---
 
