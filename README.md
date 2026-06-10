@@ -66,7 +66,7 @@ One line. This is how most people should install Witzper.
 brew install --cask ZipLyne-Agency/witzper/witzper
 ```
 
-Homebrew strips the `com.apple.quarantine` xattr automatically, so macOS Gatekeeper won't block first launch even though Witzper isn't notarized. After install, open Witzper from `/Applications` and grant **Microphone**, **Accessibility**, and **Input Monitoring** under *System Settings → Privacy & Security*.
+Every release is **code-signed and notarized by Apple**, so it opens with no Gatekeeper friction. After install, open Witzper from `/Applications` and grant **Microphone**, **Accessibility**, and **Input Monitoring** under *System Settings → Privacy & Security*.
 
 Upgrade later with:
 ```bash
@@ -74,17 +74,11 @@ brew upgrade --cask witzper
 ```
 (Or use the in-app **Check for Updates…** menu item — see [🔄 Updating Witzper](#-updating-witzper).)
 
-### 2. Download the DMG or ZIP from GitHub Releases
+### 2. Direct download from GitHub Releases
 
-Grab the latest [`Witzper-X.Y.Z.dmg`](https://github.com/ZipLyne-Agency/Witzper/releases/latest) (drag-to-install disk image) or `Witzper-X.Y.Z.zip`. After unzipping or mounting, drag **Witzper.app** into `/Applications`.
+**[⬇ Download Witzper.zip](https://github.com/ZipLyne-Agency/Witzper/releases/latest/download/Witzper.zip)** — this link always points to the newest version. Unzip and drag **Witzper.app** into `/Applications`, then double-click it.
 
-**⚠️ One extra step**: because Witzper is ad-hoc signed (no Apple Developer account), macOS Gatekeeper will refuse to open it on first launch. Strip the quarantine attribute with a single command:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Witzper.app
-```
-
-Then double-click Witzper.app. This is not needed if you install via Homebrew (option 1 above) — brew does it for you.
+No warnings, no extra steps: every release is **code-signed with a Developer ID and notarized by Apple**, and in-app updates verify both a SHA-256 checksum and the code signature before installing.
 
 ### 3. Build from source
 

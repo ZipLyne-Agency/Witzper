@@ -155,11 +155,16 @@ class AppContextProvider:
     @staticmethod
     def _applescript_window_title(app_name: str) -> str | None:
         try:
+            # app_name comes from the frontmost app and is attacker-influenced
+            # (any app can name itself anything). Escape it for the AppleScript
+            # string literal so quotes/backslashes can't break out and execute
+            # arbitrary AppleScript.
+            escaped = app_name.replace("\\", "\\\\").replace('"', '\\"')
             out = subprocess.check_output(
                 [
                     "osascript",
                     "-e",
-                    f'tell application "System Events" to tell process "{app_name}" '
+                    f'tell application "System Events" to tell process "{escaped}" '
                     f"to get name of front window",
                 ],
                 timeout=0.5,

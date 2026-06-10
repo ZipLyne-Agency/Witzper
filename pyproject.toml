@@ -1,6 +1,6 @@
 [project]
 name = "Witzper"
-version = "0.2.6"
+version = "0.3"
 description = "Fully local dictation for macOS Apple Silicon"
 requires-python = ">=3.11"
 readme = "README.md"

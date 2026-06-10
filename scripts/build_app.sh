@@ -10,10 +10,10 @@ CONTENTS="${APP_DIR}/Contents"
 MACOS="${CONTENTS}/MacOS"
 RES="${CONTENTS}/Resources"
 
-# Version is read from the VERSION file at the repo root — the single source
-# of truth consumed by build_app.sh, scripts/release.sh, and the in-app
-# Updater (which compares it against GitHub Releases). Bump by running
-# scripts/release.sh X.Y.Z, not by hand-editing this file.
+# Version is read from the VERSION file at the repo root. In the repo it
+# holds the MAJOR.MINOR base; release CI stamps the full computed version
+# (base + commit count) into its workspace copy before calling this script.
+# Bump the base with scripts/release.sh minor|major.
 VERSION="$(cat VERSION | tr -d '[:space:]')"
 if [[ -z "$VERSION" ]]; then
     echo "ERROR: VERSION file is empty" >&2
@@ -167,11 +167,38 @@ else
     echo "→ skipping python bundle (WITZPER_SKIP_PYTHON_BUNDLE=1)"
 fi
 
-# Ad-hoc sign so it runs without Gatekeeper friction. --deep recursively
-# signs every embedded binary in Contents/Resources/python (python3, each
-# .dylib, each .so). Without this, the first-launch spawn of the bundled
-# interpreter would be killed by macOS with a code-signing violation.
-codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+# Signing.
+#
+#   default            ad-hoc (local dev; Gatekeeper-frictionless on this Mac)
+#   SIGN_IDENTITY=…    Developer ID distribution signing: every Mach-O in the
+#                      bundle individually, hardened runtime + secure
+#                      timestamp, with entitlements (mic / Apple Events) —
+#                      exactly what Apple notarization requires.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+else
+    ENT_APP="configs/entitlements-app.plist"
+    ENT_PY="configs/entitlements-python.plist"
+
+    echo "→ signing bundled libraries (Developer ID, this takes a few minutes)"
+    find "${APP_DIR}" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 |
+        xargs -0 -n 50 codesign -f --timestamp -o runtime -s "${SIGN_IDENTITY}"
+
+    echo "→ signing bundled executables (python3.13 etc.)"
+    while IFS= read -r -d '' bin; do
+        if file -b "$bin" | grep -q "Mach-O"; then
+            codesign -f --timestamp -o runtime --entitlements "$ENT_PY" \
+                -s "${SIGN_IDENTITY}" "$bin"
+        fi
+    done < <(find "${APP_DIR}/Contents/Resources" -type f -perm +111 \
+                  ! -name "*.so" ! -name "*.dylib" -print0)
+
+    echo "→ signing Witzper.app"
+    codesign -f --timestamp -o runtime --entitlements "$ENT_APP" \
+        -s "${SIGN_IDENTITY}" "${APP_DIR}"
+    codesign --verify --strict "${APP_DIR}"
+fi
 
 echo "✔ built ${APP_DIR} (v${VERSION} build ${BUILD_NUMBER})"
 echo "  install: cp -r ${APP_DIR} /Applications/"

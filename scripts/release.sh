@@ -1,116 +1,39 @@
 #!/usr/bin/env bash
-# One-command release: bump VERSION, commit, tag, push.
+# Releases are AUTOMATIC: every push to main builds, signs, notarizes and
+# publishes a release (see .github/workflows/release.yml). The version is
+# "<VERSION file MAJOR.MINOR>.<commit count>" — there are no tags to push and
+# no patch numbers to manage.
 #
-#   scripts/release.sh              # auto-bump patch (0.1.0 → 0.1.1)
-#   scripts/release.sh patch        # same
-#   scripts/release.sh minor        # 0.1.0 → 0.2.0
-#   scripts/release.sh major        # 0.1.0 → 1.0.0
-#   scripts/release.sh 0.2.0        # explicit version
+# This script only bumps the MAJOR.MINOR base in the VERSION file:
 #
-# The push of the tag triggers .github/workflows/release.yml, which builds
-# Witzper.app on macos-14, zips it, and creates a GitHub Release with the
-# zip + dmg + latest.json manifest attached. The in-app Updater reads
-# latest.json to notify installed clients of new builds.
+#   scripts/release.sh minor        # 0.3 -> 0.4
+#   scripts/release.sh major        # 0.3 -> 1.0
 #
-# Safety checks:
-#   - Must be on main.
-#   - Working tree must be clean (no staged or unstaged changes).
-#   - Version must be strict semver (X.Y.Z).
-#   - Tag must not already exist.
+# Commit + push the change and CI does the rest.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BUMP_ARG="${1:-patch}"
+BUMP_ARG="${1:-}"
 
-# Parse current version from the VERSION file.
-CURRENT="$(cat VERSION | tr -d '[:space:]')"
-if ! [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-    echo "ERROR: VERSION file must contain X.Y.Z (got: $CURRENT)" >&2
-    exit 2
-fi
-CUR_MAJOR="${BASH_REMATCH[1]}"
-CUR_MINOR="${BASH_REMATCH[2]}"
-CUR_PATCH="${BASH_REMATCH[3]}"
+CURRENT="$(cut -d. -f1,2 <<< "$(cat VERSION | tr -d '[:space:]')")"
+MAJOR="$(cut -d. -f1 <<< "$CURRENT")"
+MINOR="$(cut -d. -f2 <<< "$CURRENT")"
 
-# Resolve the requested version.
 case "$BUMP_ARG" in
-    patch)
-        VERSION="${CUR_MAJOR}.${CUR_MINOR}.$((CUR_PATCH + 1))"
-        ;;
-    minor)
-        VERSION="${CUR_MAJOR}.$((CUR_MINOR + 1)).0"
-        ;;
-    major)
-        VERSION="$((CUR_MAJOR + 1)).0.0"
-        ;;
+    minor) NEW="${MAJOR}.$((MINOR + 1))" ;;
+    major) NEW="$((MAJOR + 1)).0" ;;
     *)
-        VERSION="$BUMP_ARG"
+        echo "usage: scripts/release.sh minor|major" >&2
+        echo "(patch releases happen automatically on every push to main)" >&2
+        exit 2
         ;;
 esac
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: version must be X.Y.Z or one of patch|minor|major (got: $BUMP_ARG)" >&2
-    exit 2
-fi
+echo "$NEW" > VERSION
 
-echo "→ current: v${CURRENT}   new: v${VERSION}"
+# Keep pyproject.toml's package version in lockstep with the VERSION base.
+sed -i '' "s/^version = \".*\"/version = \"${NEW}\"/" pyproject.toml
 
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [[ "$BRANCH" != "main" ]]; then
-    echo "ERROR: must release from main (currently on: $BRANCH)" >&2
-    exit 2
-fi
-
-if ! git diff-index --quiet HEAD --; then
-    echo "ERROR: working tree is dirty. Commit or stash before releasing." >&2
-    git status --short >&2
-    exit 2
-fi
-
-TAG="v${VERSION}"
-if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
-    echo "ERROR: tag ${TAG} already exists" >&2
-    exit 2
-fi
-
-echo "→ bumping VERSION and pyproject.toml to ${VERSION}"
-echo "${VERSION}" > VERSION
-python3 - "$VERSION" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-version = sys.argv[1]
-path = Path("pyproject.toml")
-text = path.read_text()
-text, count = re.subn(
-    r'(?m)^version = "[^"]+"$',
-    f'version = "{version}"',
-    text,
-    count=1,
-)
-if count != 1:
-    raise SystemExit("ERROR: could not update pyproject.toml version")
-path.write_text(text)
-PY
-
-echo "→ committing"
-git add VERSION pyproject.toml
-# Use FLOW_SKIP_REBUILD so the post-commit hook doesn't fire — the release
-# workflow on GitHub will produce the official artifact.
-FLOW_SKIP_REBUILD=1 git commit -m "release: v${VERSION}"
-
-echo "→ tagging ${TAG}"
-git tag -a "${TAG}" -m "v${VERSION}"
-
-echo "→ pushing main + tag"
-git push origin main
-git push origin "${TAG}"
-
-echo ""
-echo "✔ released ${TAG}"
-echo "  GitHub Actions will build Witzper.app and publish the release at:"
-echo "  https://github.com/ZipLyne-Agency/Witzper/releases/tag/${TAG}"
-echo ""
-echo "  Users with Witzper already installed will see the update via"
-echo "  menu bar → Check for Updates… within 24 hours (or manually on click)."
+echo "-> VERSION base bumped: ${CURRENT} -> ${NEW} (VERSION + pyproject.toml)"
+echo "   commit + push to main and CI will ship v${NEW}.<commit-count>:"
+echo "     git add VERSION pyproject.toml && git commit -m 'Bump version base to ${NEW}' && git push"

@@ -198,6 +198,11 @@ enum Updater {
             throw UpdaterError.unzipFailed("Witzper.app not found in downloaded zip")
         }
 
+        // Defense in depth beyond the sha256 check: the downloaded app must
+        // carry a valid Developer ID signature from OUR team. A compromised
+        // release page or manifest can't push us an unsigned/foreign build.
+        try verifyCodeSignature(of: newApp)
+
         let installed = URL(fileURLWithPath: "/Applications/Witzper.app")
         if fm.fileExists(atPath: installed.path) {
             // Move the current install to the trash so it's recoverable.
@@ -214,6 +219,27 @@ enum Updater {
             try fm.copyItem(at: newApp, to: installed)
         } catch {
             throw UpdaterError.replaceFailed(error.localizedDescription)
+        }
+    }
+
+    /// Requires a valid, strict Developer ID signature from the ZipLyne team
+    /// (DHGG5BA7J7) on the downloaded bundle. Throws if absent or invalid.
+    private static func verifyCodeSignature(of app: URL) throws {
+        let verify = Process()
+        verify.launchPath = "/usr/bin/codesign"
+        verify.arguments = [
+            "--verify", "--deep", "--strict",
+            "-R", "=anchor apple generic and certificate leaf[subject.OU] = \"DHGG5BA7J7\"",
+            app.path,
+        ]
+        let errPipe = Pipe()
+        verify.standardError = errPipe
+        try verify.run()
+        verify.waitUntilExit()
+        if verify.terminationStatus != 0 {
+            let msg = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw UpdaterError.replaceFailed(
+                "downloaded app failed code-signature verification: \(msg)")
         }
     }
 
@@ -318,7 +344,7 @@ final class ProgressWindow {
         bar.minValue = 0
         bar.maxValue = 1
 
-        let view = NSView(frame: window.contentView!.bounds)
+        let view = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 360, height: 110))
         view.addSubview(label)
         view.addSubview(bar)
         window.contentView = view
